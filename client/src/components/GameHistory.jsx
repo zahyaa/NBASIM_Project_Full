@@ -20,3 +20,8 @@ export default function GameHistory() {
     </div>
   );
 }
+
+// This component fetches and displays the history of games from the server.
+// It uses the `useEffect` hook to make an API call to retrieve the game data when the component mounts.
+// The game history is displayed as a list of games, showing the teams and their scores.
+
