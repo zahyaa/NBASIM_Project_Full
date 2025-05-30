@@ -1,6 +1,6 @@
-# 🏀 NBASIM - NBA Simulation App
+# 🏀 BASKETBALL SIMULATION APP
 
-NBASIM is a full-stack NBA game simulator built with the MERN stack (MongoDB, Express, React, Node.js). It simulates real-time basketball games using live player data and includes features like team selection, game controls, live play-by-play commentary, and historical game storage.
+Basketball sim is a full-stack NBA game simulator built with the MERN stack (MongoDB, Express, React, Node.js). It simulates real-time basketball games using live player data and includes features like team selection, game controls, live play-by-play commentary, and historical game storage.
 
 ## 🌐 Live Features
 
@@ -76,6 +76,12 @@ Visit [http://localhost:3000](http://localhost:3000)
 - ESPN-style GameCast layout
 - Player performance graphs
 - Multiplayer simulation mode
+
+#---------------------------------------------------------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------------------------------------
+
+
+
 
 # Basketball Simulation Game
 
