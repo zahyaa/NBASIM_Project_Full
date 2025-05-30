@@ -1,7 +1,5 @@
 import { useEffect, useState } from 'react';
-
-// Example API endpoint for teams
-const TEAMS_API = '/api/teams';
+import { fetchTeams } from '../api/api';
 
 export function useTeams() {
   const [teams, setTeams] = useState([]);
@@ -10,20 +8,11 @@ export function useTeams() {
 
   useEffect(() => {
     setLoading(true);
-    fetch(TEAMS_API)
-      .then(res => {
-        if (!res.ok) throw new Error('Failed to fetch teams');
-        return res.json();
-      })
-      .then(data => {
-        setTeams(data);
-        setLoading(false);
-      })
-      .catch(err => {
-        setError(err);
-        setLoading(false);
-      });
+    fetchTeams()
+      .then(setTeams)
+      .catch(setError)
+      .finally(() => setLoading(false));
   }, []);
 
-  return teams;
+  return { teams, loading, error };
 }

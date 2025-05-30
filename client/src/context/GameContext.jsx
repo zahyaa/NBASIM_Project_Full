@@ -7,8 +7,9 @@ export function GameProvider({ children }) {
   const [teamB, setTeamB] = useState('');
   const [isRunning, setIsRunning] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
+  const [quarter, setQuarter] = useState(1);
+  const [season, setSeason] = useState(2025);
 
-  // Dummy implementations for controls
   const startGame = () => setIsRunning(true);
   const pauseGame = () => setIsPaused(p => !p);
   const stopGame = () => setIsRunning(false);
@@ -19,7 +20,9 @@ export function GameProvider({ children }) {
       teamA, setTeamA,
       teamB, setTeamB,
       isRunning, isPaused,
-      startGame, pauseGame, stopGame, timeout
+      startGame, pauseGame, stopGame, timeout,
+      quarter, setQuarter,
+      season, setSeason
     }}>
       {children}
     </GameContext.Provider>
