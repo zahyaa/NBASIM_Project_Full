@@ -36,11 +36,11 @@ git clone https://github.com/your-username/NBASIM_Project_Full.git
 cd NBASIM_Project_Full
 ```
 
-### 2. Start MongoDB
+### 2. Start MongoDB (MACOS)
 
 ```bash
-mkdir -p ~/mongo-data/db
-mongod --dbpath ~/mongo-data/db
+brew services start mongodb/brew/mongodb-community
+
 ```
 
 ### 3. Start Backend
