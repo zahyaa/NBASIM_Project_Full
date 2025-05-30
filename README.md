@@ -135,6 +135,12 @@ This project simulates an NBA basketball game between two user-selected teams. U
 
 ---
 
+![Game Screenshot](./assets/screenshots/b1.png)
+
+
+
+![Game Screenshot](./assets/screenshots/b2.png)
+
 ## Future Improvements
 
 - Add more player stats (rebounds, assists, etc.).
