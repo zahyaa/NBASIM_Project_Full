@@ -38,10 +38,24 @@ export default function GameSimulator() {
 
   function fastForwardGame() {
     clearInterval(intervalRef.current);
-    while (clock > 0) {
-      simulatePlay();
-      setClock(c => c - 1);
+    let currentClock = clock;
+    const currentScore = { ...score };
+    const newLog = [...playLog];
+
+    while (currentClock > 0) {
+      const chance = Math.random();
+      if (chance < 0.05) {
+        const team = Math.random() < 0.5 ? 'teamA' : 'teamB';
+        const points = Math.random() < 0.7 ? 2 : 3;
+        currentScore[team] += points;
+        newLog.push(`${team} scored ${points} points`);
+      }
+      currentClock--;
     }
+
+    setClock(0);
+    setScore(currentScore);
+    setPlayLog(newLog);
     setIsRunning(false);
   }
 

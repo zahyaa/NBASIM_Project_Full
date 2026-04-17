@@ -1,29 +1,41 @@
-# 🏀 BASKETBALL SIMULATION APP
+# 🏀 Basketball Simulator
 
-Basketball sim is a full-stack NBA game simulator built with the MERN stack (MongoDB, Express, React, Node.js). It simulates real-time basketball games using live player data and includes features like team selection, game controls, live play-by-play commentary, and historical game storage.
+A full-stack basketball game simulator built with the MERN stack (MongoDB, Express, React, Node.js). Draft real NBA players, build your roster, and simulate games with an animated play-by-play gamecast.
 
-## 🌐 Live Features
+## 🌐 Features
 
-- 🧠 **Real-Time Game Simulation** – 48-minute games using actual NBA player stats
-- 🎮 **Interactive Controls** – Start, Pause, Stop, Timeout, Fast Forward
-- 📊 **Live Play-by-Play Log** – Track actions as they happen
-- 🧾 **Game History Tracking** – Stores previous games in MongoDB
-- 🧑‍🤝‍🧑 **Team Selector** – Choose different NBA teams
-- 📡 **Socket.IO Ready** – Optional real-time broadcasting support
+- 🔐 **User Authentication** – Register/login with JWT-based auth
+- 🏟️ **Conference & League Selection** – Choose Eastern or Western Conference and league before drafting
+- 📋 **Fantasy Draft** – Draft up to 12 real NBA players from the balldontlie API
+- 🧠 **Player Ratings** – Heuristic ratings based on draft position and experience (stats-based on paid API tiers)
+- 🎮 **Game Simulation** – Full 4-quarter + overtime engine with weighted scoring, rebounds, assists, turnovers
+- 📺 **Animated GameCast** – Live play-by-play with scoreboard, speed controls (Slow/Normal/Fast/Turbo), and auto-scroll
+- 🔄 **Fresh Start on Login** – Roster resets each session so you can re-draft and play again
+- 💾 **Save Progress** – Wins, losses, and game history stored in MongoDB
 
 ## 🚀 Tech Stack
 
-- **Frontend:** React, Tailwind (optional), JavaScript
-- **Backend:** Node.js, Express, Mongoose
-- **Database:** MongoDB (local or Atlas)
-- **API:** NBA stats via [balldontlie.io](https://www.balldontlie.io/)
+- **Frontend:** React 18, React Router 6, Context API
+- **Backend:** Node.js, Express, Mongoose, JWT, bcryptjs
+- **Database:** MongoDB
+- **API:** NBA data via [balldontlie.io](https://www.balldontlie.io/) (free tier supported)
 
 ## 📁 Project Structure
 
 ```
 project-root/
-├── client/    # React frontend
-├── server/    # Express backend
+├── client/                 # React frontend
+│   ├── src/
+│   │   ├── context/        # AuthContext (auth state)
+│   │   ├── pages/          # LoginPage, DraftPage, GamePage
+│   │   └── components/     # GameCast, Controls, etc.
+│   └── public/
+├── server/                 # Express backend
+│   ├── models/             # User, Game schemas
+│   ├── routes/             # auth, draft, nba, simulate, games
+│   ├── services/           # playerRating, simulation engine
+│   ├── middleware/          # JWT auth middleware
+│   └── .env.example        # Environment variable template
 └── README.md
 ```
 
@@ -32,31 +44,43 @@ project-root/
 ### 1. Clone the Repo
 
 ```bash
-git clone https://github.com/your-username/NBASIM_Project_Full.git
+git clone https://github.com/zahyaa/NBASIM_Project_Full.git
 cd NBASIM_Project_Full
 ```
 
-### 2. Start MongoDB (MACOS)
+### 2. Start MongoDB
 
 ```bash
 brew services start mongodb/brew/mongodb-community
-
 ```
 
-### 3. Start Backend
+### 3. Configure Environment
+
+```bash
+cp server/.env.example server/.env
+```
+
+Edit `server/.env` with your values:
+- `MONGODB_URI` – MongoDB connection string
+- `JWT_SECRET` – Any secret string for token signing
+- `BALLDONTLIE_API_KEY` – Free API key from [app.balldontlie.io](https://app.balldontlie.io/)
+
+### 4. Start Backend
 
 ```bash
 cd server
 npm install
-npm start
+node server.js
 ```
 
-### 4. Start Frontend
+Server runs on [http://localhost:5001](http://localhost:5001)
+
+### 5. Start Frontend
 
 ```bash
-cd ../client
+cd client
 npm install
-npm start
+NODE_OPTIONS=--openssl-legacy-provider npm start
 ```
 
 Visit [http://localhost:3000](http://localhost:3000)
@@ -65,19 +89,34 @@ Visit [http://localhost:3000](http://localhost:3000)
 
 ## 🧪 API Endpoints
 
-- `GET /api/games` – Get all saved games
+### Auth
+- `POST /api/auth/register` – Create account
+- `POST /api/auth/login` – Login (resets roster)
+- `GET /api/auth/me` – Get current user (protected)
+
+### Draft
+- `POST /api/draft/setup` – Save conference & league selection
+- `GET /api/draft/pool` – Get available players (filtered by conference)
+- `POST /api/draft/pick` – Draft a player
+- `POST /api/draft/complete` – Finish draft early
+
+### NBA Data
+- `GET /api/nba/teams` – All NBA teams
+- `GET /api/nba/players` – Player search
+- `GET /api/nba/roster` – Team roster with ratings
+
+### Game
+- `POST /api/simulate` – Simulate a game
+- `GET /api/games` – Saved game history
 - `POST /api/games/save` – Save a game result
 
 ---
 
-## 🧠 Future Improvements
+## 📝 Notes
 
-- WebSocket-powered live view
-- ESPN-style GameCast layout
-- Player performance graphs
-- Multiplayer simulation mode
-
-#---------------------------------------------------------------------
+- Port 5001 is used instead of 5000 (macOS AirPlay Receiver occupies 5000)
+- `NODE_OPTIONS=--openssl-legacy-provider` is required for react-scripts 3.x on Node 18+
+- Free balldontlie API tier supports Teams, Players, and Games; Season Averages require a paid plan
 #-----------------------------------------------------------------------------
 
 # Basketball Simulation Game

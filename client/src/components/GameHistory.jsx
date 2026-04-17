@@ -4,9 +4,13 @@ export default function GameHistory() {
   const [games, setGames] = useState([]);
 
   useEffect(() => {
-    fetch('http://localhost:5000/api/games')
-      .then(res => res.json())
-      .then(setGames);
+    fetch('/api/games')
+      .then(res => {
+        if (!res.ok) throw new Error('Failed to fetch games');
+        return res.json();
+      })
+      .then(setGames)
+      .catch(err => console.error('GameHistory fetch error:', err));
   }, []);
 
   return (
