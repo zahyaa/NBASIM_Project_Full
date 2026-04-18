@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Software Development Document — Basketball Simulator</title>
+<style>
+  @page { margin: 0.75in; size: letter; }
+  * { box-sizing: border-box; }
+  body {
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    color: #1e293b;
+    line-height: 1.6;
+    max-width: 8.5in;
+    margin: 0 auto;
+    padding: 40px 60px;
+    font-size: 11pt;
+  }
+  h1 { font-size: 28pt; color: #0f172a; margin: 0 0 4px; }
+  h2 { font-size: 16pt; color: #1e40af; border-bottom: 2px solid #1e40af; padding-bottom: 4px; margin-top: 32px; }
+  h3 { font-size: 13pt; color: #334155; margin-top: 20px; }
+  code, pre { font-family: 'SF Mono', 'Menlo', 'Consolas', monospace; }
+  code { background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-size: 10pt; }
+  pre {
+    background: #0f172a; color: #e2e8f0; padding: 14px 18px; border-radius: 8px;
+    font-size: 9.5pt; overflow-x: auto; line-height: 1.5;
+  }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 10.5pt; }
+  th { background: #1e40af; color: #fff; padding: 8px 12px; text-align: left; }
+  td { padding: 7px 12px; border-bottom: 1px solid #e2e8f0; }
+  tr:nth-child(even) td { background: #f8fafc; }
+  .cover { text-align: center; padding: 120px 0 80px; page-break-after: always; }
+  .cover h1 { font-size: 36pt; margin-bottom: 8px; }
+  .cover .subtitle { font-size: 14pt; color: #64748b; margin: 0; }
+  .cover .meta { margin-top: 40px; font-size: 11pt; color: #475569; }
+  .badge { display: inline-block; background: #1e40af; color: #fff; padding: 3px 10px; border-radius: 4px; font-size: 9pt; font-weight: 600; margin: 2px; }
+  .tree { background: #f8fafc; padding: 14px 18px; border-radius: 8px; font-size: 10pt; line-height: 1.8; border: 1px solid #e2e8f0; }
+  .section-break { page-break-before: always; }
+  .flow-diagram { background: #f1f5f9; border: 1px solid #cbd5e1; border-radius: 8px; padding: 16px; text-align: center; margin: 16px 0; font-size: 10pt; }
+  .flow-diagram .arrow { color: #1e40af; font-weight: bold; }
+  ul { padding-left: 20px; }
+  li { margin-bottom: 4px; }
+</style>
+</head>
+<body>
+
+<!-- ====== COVER PAGE ====== -->
+<div class="cover">
+  <h1>🏀 Basketball Simulator</h1>
+  <p class="subtitle">Software Development Document</p>
+  <div class="meta">
+    <p><strong>Author:</strong> Yahya Zahya</p>
+    <p><strong>Repository:</strong> github.com/zahyaa/NBASIM_Project_Full</p>
+    <p><strong>Version:</strong> 1.0</p>
+    <p><strong>Date:</strong> April 17, 2026</p>
+  </div>
+</div>
+
+<!-- ====== TABLE OF CONTENTS ====== -->
+<h2>Table of Contents</h2>
+<ol>
+  <li><a href="#overview">Project Overview</a></li>
+  <li><a href="#techstack">Tech Stack &amp; Services</a></li>
+  <li><a href="#architecture">System Architecture</a></li>
+  <li><a href="#structure">File &amp; Directory Structure</a></li>
+  <li><a href="#backend">Backend — Code Walkthrough</a></li>
+  <li><a href="#frontend">Frontend — Code Walkthrough</a></li>
+  <li><a href="#api">API Endpoint Reference</a></li>
+  <li><a href="#local">How to Run Locally</a></li>
+  <li><a href="#deploy">How to Deploy to Production</a></li>
+  <li><a href="#env">Environment Variables</a></li>
+</ol>
+
+<!-- ====== 1. OVERVIEW ====== -->
+<h2 id="overview">1. Project Overview</h2>
+<p>
+  <strong>Basketball Simulator</strong> is a full-stack web application that lets users draft real NBA players, build a fantasy roster, and simulate basketball games with an animated play-by-play gamecast. The application pulls live player data from the balldontlie.io NBA API, generates player ratings, and runs a statistical game simulation engine on the server.
+</p>
+<h3>Core User Flow</h3>
+<div class="flow-diagram">
+  Register / Login <span class="arrow">→</span>
+  Select Conference &amp; League <span class="arrow">→</span>
+  Draft 5–12 Players <span class="arrow">→</span>
+  Pick Opponent Team <span class="arrow">→</span>
+  Simulate Game <span class="arrow">→</span>
+  Watch Animated GameCast <span class="arrow">→</span>
+  View W/L Record
+</div>
+
+<!-- ====== 2. TECH STACK ====== -->
+<h2 id="techstack" class="section-break">2. Tech Stack &amp; Services</h2>
+
+<h3>2.1 Runtime &amp; Languages</h3>
+<table>
+  <tr><th>Technology</th><th>Role</th><th>Version</th></tr>
+  <tr><td>Node.js</td><td>Server runtime</td><td>18+ (tested on 25.9.0)</td></tr>
+  <tr><td>JavaScript (ES6+)</td><td>All application code</td><td>—</td></tr>
+  <tr><td>React</td><td>Frontend UI library</td><td>18.x</td></tr>
+</table>
+
+<h3>2.2 Backend Stack</h3>
+<table>
+  <tr><th>Package</th><th>Purpose</th></tr>
+  <tr><td><code>express</code></td><td>HTTP server and REST API routing</td></tr>
+  <tr><td><code>mongoose</code></td><td>MongoDB ODM — schema definitions, queries, validation</td></tr>
+  <tr><td><code>jsonwebtoken</code></td><td>JWT token generation and verification for auth</td></tr>
+  <tr><td><code>bcryptjs</code></td><td>Password hashing (12-round bcrypt)</td></tr>
+  <tr><td><code>axios</code></td><td>HTTP client for proxying requests to the NBA API</td></tr>
+  <tr><td><code>cors</code></td><td>Cross-Origin Resource Sharing headers</td></tr>
+  <tr><td><code>dotenv</code></td><td>Loads <code>.env</code> file into <code>process.env</code></td></tr>
+</table>
+
+<h3>2.3 Frontend Stack</h3>
+<table>
+  <tr><th>Package</th><th>Purpose</th></tr>
+  <tr><td><code>react</code> / <code>react-dom</code></td><td>Component-based UI rendering</td></tr>
+  <tr><td><code>react-router-dom</code> v6</td><td>Client-side routing (login, draft, game pages)</td></tr>
+  <tr><td><code>react-scripts</code> 3.x</td><td>Build tooling (Webpack, Babel, dev server with proxy)</td></tr>
+</table>
+
+<h3>2.4 Database</h3>
+<table>
+  <tr><th>Service</th><th>Purpose</th></tr>
+  <tr><td>MongoDB Community 8.x</td><td>Document database storing users, teams, rosters, game history</td></tr>
+  <tr><td>MongoDB Atlas (optional)</td><td>Cloud-hosted MongoDB for production deployments</td></tr>
+</table>
+
+<h3>2.5 External API</h3>
+<table>
+  <tr><th>Service</th><th>URL</th><th>Tier</th><th>Data Provided</th></tr>
+  <tr><td>balldontlie.io</td><td>api.balldontlie.io/v1</td><td>Free</td><td>Teams, Players, Games</td></tr>
+  <tr><td></td><td></td><td>Paid ($9.99+)</td><td>Season Averages, Stats, Box Scores, Standings</td></tr>
+</table>
+<p>Authentication uses an API key passed as an <code>Authorization</code> HTTP header on every request.</p>
+
+<!-- ====== 3. ARCHITECTURE ====== -->
+<h2 id="architecture" class="section-break">3. System Architecture</h2>
+
+<div class="flow-diagram" style="text-align:left; padding: 20px; line-height: 2.0;">
+<pre style="background: #f1f5f9; color: #1e293b; border: none; font-size: 10pt;">
+┌─────────────────────┐         ┌─────────────────────────┐
+│   React Client       │  HTTP   │   Express Server         │
+│   (localhost:3000)   │ ──────► │   (localhost:5001)       │
+│                      │ proxy   │                          │
+│  LoginPage           │         │  /api/auth/*   Auth      │
+│  DraftPage           │         │  /api/draft/*  Draft     │
+│  GamePage            │         │  /api/nba/*    NBA Proxy │
+│  GameCast            │         │  /api/simulate Sim Engine│
+│  AuthContext         │         │  /api/games    History   │
+└─────────────────────┘         └────────┬────────────────┘
+                                         │
+                          ┌──────────────┼──────────────┐
+                          │              │              │
+                          ▼              ▼              ▼
+                    ┌──────────┐  ┌────────────┐  ┌──────────────┐
+                    │ MongoDB  │  │ balldontlie │  │ Simulation   │
+                    │ Database │  │ NBA API     │  │ Engine       │
+                    │          │  │ (external)  │  │ (in-process) │
+                    └──────────┘  └────────────┘  └──────────────┘
+</pre>
+</div>
+
+<p><strong>Request flow:</strong> The React client makes <code>fetch()</code> calls to <code>/api/*</code>. In development, react-scripts' built-in proxy forwards these to <code>http://localhost:5001</code>. The Express server handles authentication, proxies NBA data requests to balldontlie.io, runs the simulation engine in-process, and persists data to MongoDB.</p>
+
+<!-- ====== 4. FILE STRUCTURE ====== -->
+<h2 id="structure" class="section-break">4. File &amp; Directory Structure</h2>
+
+<div class="tree"><pre style="background:transparent; color:#1e293b; border:none; padding:0;">
+NBASIM_Project_Full/
+├── .gitignore                  # Ignores node_modules/, .env, .DS_Store, build/
+├── README.md                   # Project documentation
+├── package.json                # Root package (metadata only)
+│
+├── server/                     # ── Express Backend ──────────────────
+│   ├── server.js               # Entry point — wires all middleware & routes
+│   ├── .env                    # Environment secrets (not committed)
+│   ├── .env.example            # Template showing required env vars
+│   ├── package.json            # Backend dependencies
+│   │
+│   ├── models/
+│   │   ├── User.js             # User schema (auth, team, draft, W/L)
+│   │   └── Game.js             # Game schema (teams, scores, play log)
+│   │
+│   ├── middleware/
+│   │   └── auth.js             # JWT verification middleware
+│   │
+│   ├── routes/
+│   │   ├── auth.js             # POST /register, POST /login, GET /me
+│   │   ├── draft.js            # POST /setup, GET /pool, POST /pick, POST /complete
+│   │   ├── nba.js              # GET /teams, GET /players, GET /roster (API proxy)
+│   │   ├── simulate.js         # POST / — run game simulation
+│   │   └── games.js            # GET / — game history, POST /save
+│   │
+│   └── services/
+│       ├── playerRating.js     # Rating algorithms (stats-based & profile-based)
+│       └── simulation.js       # 4Q + OT game engine with play-by-play output
+│
+├── client/                     # ── React Frontend ───────────────────
+│   ├── package.json            # Frontend dependencies + proxy config
+│   ├── public/
+│   │   └── index.html          # HTML shell
+│   │
+│   └── src/
+│       ├── index.js            # React DOM render entry point
+│       ├── App.jsx             # Router, nav bar, route guards
+│       │
+│       ├── context/
+│       │   └── AuthContext.jsx  # Auth state (token, user, login/logout)
+│       │
+│       ├── pages/
+│       │   ├── LoginPage.jsx   # Login / register form
+│       │   ├── DraftPage.jsx   # Conference selection + fantasy draft UI
+│       │   └── GamePage.jsx    # Opponent selection + simulation trigger
+│       │
+│       └── components/
+│           ├── GameCast.jsx    # Animated play-by-play with scoreboard
+│           ├── GameHistory.jsx # Historical game list
+│           └── ...             # Legacy components (Controls, Quarter, etc.)
+</pre></div>
+
+<!-- ====== 5. BACKEND CODE WALKTHROUGH ====== -->
+<h2 id="backend" class="section-break">5. Backend — Code Walkthrough</h2>
+
+<h3>5.1 <code>server/server.js</code> — Entry Point</h3>
+<p>The main file bootstraps the application:</p>
+<ul>
+  <li>Loads environment variables with <code>dotenv</code></li>
+  <li>Connects to MongoDB via Mongoose</li>
+  <li>Registers middleware: <code>cors()</code> and <code>express.json()</code></li>
+  <li>Mounts all route modules under <code>/api/*</code> prefixes</li>
+  <li>Listens on port 5001 (configurable via <code>PORT</code> env var)</li>
+</ul>
+
+<h3>5.2 <code>server/models/User.js</code> — User Schema</h3>
+<p>Defines the Mongoose schema for user accounts. Key fields:</p>
+<table>
+  <tr><th>Field</th><th>Type</th><th>Purpose</th></tr>
+  <tr><td><code>username</code></td><td>String (unique)</td><td>Login identifier</td></tr>
+  <tr><td><code>password</code></td><td>String</td><td>Bcrypt-hashed password (12 salt rounds)</td></tr>
+  <tr><td><code>team.name</code></td><td>String</td><td>User's custom team name</td></tr>
+  <tr><td><code>team.players[]</code></td><td>Array</td><td>Drafted roster (playerId, name, position, rating, stats)</td></tr>
+  <tr><td><code>conference</code></td><td>String</td><td>"East" or "West"</td></tr>
+  <tr><td><code>league</code></td><td>String</td><td>"NBA", "G-League", or "EuroLeague"</td></tr>
+  <tr><td><code>draftCompleted</code></td><td>Boolean</td><td>Gates access to the game page</td></tr>
+  <tr><td><code>wins / losses</code></td><td>Number</td><td>Running game record</td></tr>
+  <tr><td><code>gamesPlayed[]</code></td><td>ObjectId refs</td><td>References to Game documents</td></tr>
+</table>
+<p>A <code>pre('save')</code> hook hashes passwords before persistence. The <code>toJSON()</code> method strips the password from API responses.</p>
+
+<h3>5.3 <code>server/models/Game.js</code> — Game Schema</h3>
+<p>Stores completed game results: team names, final scores, and the full play-by-play history array. Timestamped automatically.</p>
+
+<h3>5.4 <code>server/middleware/auth.js</code> — JWT Middleware</h3>
+<p>Extracts the <code>Bearer</code> token from the <code>Authorization</code> header, verifies it with <code>jsonwebtoken</code>, and attaches <code>req.userId</code> for downstream route handlers. Returns 401 on missing or invalid tokens.</p>
+
+<h3>5.5 <code>server/routes/auth.js</code> — Authentication Routes</h3>
+<table>
+  <tr><th>Endpoint</th><th>Method</th><th>Behavior</th></tr>
+  <tr><td><code>/api/auth/register</code></td><td>POST</td><td>Creates user, hashes password, returns JWT + user object</td></tr>
+  <tr><td><code>/api/auth/login</code></td><td>POST</td><td>Validates credentials, <strong>resets roster/draft/record</strong> for fresh start, returns JWT</td></tr>
+  <tr><td><code>/api/auth/me</code></td><td>GET</td><td>Returns current user data (protected by auth middleware)</td></tr>
+</table>
+<p><strong>Design choice:</strong> Login resets the user's draft and roster every time, so each session is a fresh experience — users pick a new conference, draft a new team, and play a new season.</p>
+
+<h3>5.6 <code>server/routes/draft.js</code> — Draft Routes</h3>
+<table>
+  <tr><th>Endpoint</th><th>Method</th><th>Behavior</th></tr>
+  <tr><td><code>/api/draft/setup</code></td><td>POST</td><td>Saves conference &amp; league selection to the user document</td></tr>
+  <tr><td><code>/api/draft/pool</code></td><td>GET</td><td>Fetches 100 players from balldontlie, filters by conference, generates ratings</td></tr>
+  <tr><td><code>/api/draft/pick</code></td><td>POST</td><td>Adds a player to the user's roster (max 12, no duplicates)</td></tr>
+  <tr><td><code>/api/draft/complete</code></td><td>POST</td><td>Marks draft as done (requires minimum 5 players)</td></tr>
+</table>
+<p>The pool endpoint fetches all NBA teams to determine conference membership, then fetches players and filters to only those on teams in the selected conference. It tries to use the paid <code>/season_averages</code> endpoint first; if that returns 401 (free tier), it silently falls back to profile-based ratings.</p>
+
+<h3>5.7 <code>server/routes/nba.js</code> — NBA API Proxy</h3>
+<p>Proxies requests to balldontlie.io, adding the API key. Endpoints:</p>
+<ul>
+  <li><code>GET /api/nba/teams</code> — All 30 NBA teams</li>
+  <li><code>GET /api/nba/players</code> — Paginated player search</li>
+  <li><code>GET /api/nba/players/:id/stats</code> — Season averages for one player (falls back to profile rating on free tier)</li>
+  <li><code>GET /api/nba/roster</code> — Full team roster with ratings</li>
+</ul>
+
+<h3>5.8 <code>server/routes/simulate.js</code> — Simulation Route</h3>
+<p>Accepts the user's team and opponent roster, runs the simulation engine, saves the result as a Game document, updates the user's W/L record, and returns the full result (scores, plays, box scores).</p>
+
+<h3>5.9 <code>server/services/playerRating.js</code> — Rating System</h3>
+<p>Contains two rating algorithms:</p>
+<ul>
+  <li>
+    <strong><code>calculateRating(stats)</code></strong> — Stats-based rating (40–99 scale). Requires season averages data.
+    Weights: Scoring (max 35), Efficiency (max 20), Playmaking (max 15), Rebounding (max 10), Defense (max 10), Turnover penalty (max −5). Base floor of 40 for any NBA player.
+  </li>
+  <li>
+    <strong><code>calculateRatingFromProfile(player)</code></strong> — Profile-based heuristic for the free API tier. Uses draft round, pick number, and years of experience to generate ratings. First-round lottery picks start at 72–88; undrafted players start at 55–67. Veterans get a bonus, players 14+ years decline slightly.
+  </li>
+</ul>
+
+<h3>5.10 <code>server/services/simulation.js</code> — Game Engine</h3>
+<p>The core simulation engine models a full basketball game:</p>
+<ul>
+  <li><strong>4 quarters × 12 minutes</strong> (720 seconds each), with possessions consuming 5–24 seconds</li>
+  <li><strong>Weighted player selection:</strong> Higher-rated players get more touches via <code>pickWeightedPlayer()</code></li>
+  <li><strong>Shot outcomes</strong> are probability-based: shot chance = 35% + (rating/99 × 25%), yielding 35–60% for any player</li>
+  <li><strong>Play types:</strong> 2-pointers, 3-pointers, free throws, missed shots with rebounds, assisted baskets, turnovers</li>
+  <li><strong>Overtime:</strong> If tied after 4 quarters, 5-minute OT periods repeat until a winner emerges</li>
+  <li><strong>Output:</strong> Returns team names, final scores, full play-by-play array (with quarter, clock, team, text, running scores), and player box scores (pts, reb, ast)</li>
+</ul>
+
+<!-- ====== 6. FRONTEND CODE WALKTHROUGH ====== -->
+<h2 id="frontend" class="section-break">6. Frontend — Code Walkthrough</h2>
+
+<h3>6.1 <code>client/src/App.jsx</code> — Routing &amp; Navigation</h3>
+<p>Uses React Router v6 to define three routes:</p>
+<table>
+  <tr><th>Path</th><th>Component</th><th>Guard</th></tr>
+  <tr><td><code>/login</code></td><td>LoginPage</td><td>Redirects to /draft if already logged in</td></tr>
+  <tr><td><code>/draft</code></td><td>DraftPage</td><td>ProtectedRoute (requires auth token)</td></tr>
+  <tr><td><code>/game</code></td><td>GamePage</td><td>ProtectedRoute + DraftGate (requires completed draft)</td></tr>
+</table>
+<p>A persistent nav bar shows the app name, username, W/L record, and a logout button. The <code>DraftGate</code> component redirects users to <code>/draft</code> if they haven't finished drafting.</p>
+
+<h3>6.2 <code>client/src/context/AuthContext.jsx</code> — Auth State Management</h3>
+<p>React Context provider that manages:</p>
+<ul>
+  <li><code>token</code> — JWT stored in localStorage for persistence across page reloads</li>
+  <li><code>user</code> — Full user object fetched from <code>GET /api/auth/me</code> on mount</li>
+  <li><code>login(token, user)</code> — Saves token and sets state</li>
+  <li><code>logout()</code> — Clears localStorage and resets state</li>
+  <li><code>loading</code> — Prevents flash of login page before token validation completes</li>
+</ul>
+
+<h3>6.3 <code>client/src/pages/LoginPage.jsx</code> — Authentication UI</h3>
+<p>A toggle form that switches between login and registration modes. Dark-themed card layout with orange accent branding. Calls <code>POST /api/auth/login</code> or <code>POST /api/auth/register</code> and passes the response to <code>AuthContext.login()</code>.</p>
+
+<h3>6.4 <code>client/src/pages/DraftPage.jsx</code> — Conference Selection &amp; Draft</h3>
+<p>Two-phase page:</p>
+<ol>
+  <li><strong>Setup Phase:</strong> Displays buttons for league selection (NBA, G-League, EuroLeague) and conference (Eastern/Western). Saves selection via <code>POST /api/draft/setup</code>.</li>
+  <li><strong>Draft Phase:</strong> Two-panel layout — left panel shows the available player pool (100 players filtered by conference, sorted by rating), right panel shows the user's growing roster. Each player card displays name, position, team, and rating badge. Draft button adds player to roster. "Complete Draft" button appears once minimum 5 players are picked.</li>
+</ol>
+
+<h3>6.5 <code>client/src/pages/GamePage.jsx</code> — Game Day</h3>
+<p>Displays the user's starting five, a grid of 30 NBA teams as selectable opponents, and the selected opponent's roster preview. Clicking "Simulate Game" sends both rosters to <code>POST /api/simulate</code> and passes the result to the GameCast component.</p>
+
+<h3>6.6 <code>client/src/components/GameCast.jsx</code> — Animated Play-by-Play</h3>
+<p>The centerpiece visual component. Features:</p>
+<ul>
+  <li><strong>Live Scoreboard:</strong> Shows team names, running scores, current quarter, and game clock</li>
+  <li><strong>Play Stream:</strong> Plays appear one by one with a CSS <code>fadeSlideIn</code> animation</li>
+  <li><strong>Speed Controls:</strong> Slow (1200ms), Normal (800ms), Fast (400ms), Turbo (100ms)</li>
+  <li><strong>Playback Controls:</strong> Play/Pause toggle, Skip to End button</li>
+  <li><strong>Auto-scroll:</strong> The play log auto-scrolls to keep the latest play visible</li>
+</ul>
+<p>Uses <code>setInterval</code> with a ref for the timer, advancing <code>currentIndex</code> through the plays array at the selected speed.</p>
+
+<!-- ====== 7. API ENDPOINTS ====== -->
+<h2 id="api" class="section-break">7. API Endpoint Reference</h2>
+
+<h3>Authentication</h3>
+<table>
+  <tr><th>Method</th><th>Path</th><th>Auth</th><th>Body / Params</th><th>Response</th></tr>
+  <tr><td>POST</td><td>/api/auth/register</td><td>No</td><td><code>{ username, password }</code></td><td><code>{ token, user }</code></td></tr>
+  <tr><td>POST</td><td>/api/auth/login</td><td>No</td><td><code>{ username, password }</code></td><td><code>{ token, user }</code> (roster reset)</td></tr>
+  <tr><td>GET</td><td>/api/auth/me</td><td>Yes</td><td>—</td><td>User object</td></tr>
+</table>
+
+<h3>Draft</h3>
+<table>
+  <tr><th>Method</th><th>Path</th><th>Auth</th><th>Body / Params</th><th>Response</th></tr>
+  <tr><td>POST</td><td>/api/draft/setup</td><td>Yes</td><td><code>{ conference, league }</code></td><td>Confirmation</td></tr>
+  <tr><td>GET</td><td>/api/draft/pool</td><td>Yes</td><td><code>?season=2024&amp;conference=East</code></td><td>Array of player objects with ratings</td></tr>
+  <tr><td>POST</td><td>/api/draft/pick</td><td>Yes</td><td><code>{ playerId, firstName, lastName, position, rating, stats }</code></td><td>Updated team</td></tr>
+  <tr><td>POST</td><td>/api/draft/complete</td><td>Yes</td><td>—</td><td>Confirmation</td></tr>
+</table>
+
+<h3>NBA Data (Proxy)</h3>
+<table>
+  <tr><th>Method</th><th>Path</th><th>Auth</th><th>Params</th><th>Response</th></tr>
+  <tr><td>GET</td><td>/api/nba/teams</td><td>No</td><td>—</td><td>30 NBA teams</td></tr>
+  <tr><td>GET</td><td>/api/nba/players</td><td>No</td><td><code>?team_id, per_page, cursor</code></td><td>Paginated players</td></tr>
+  <tr><td>GET</td><td>/api/nba/players/:id/stats</td><td>No</td><td><code>?season</code></td><td>Rating + season averages</td></tr>
+  <tr><td>GET</td><td>/api/nba/roster</td><td>No</td><td><code>?team_id&amp;season</code></td><td>Team roster with ratings</td></tr>
+</table>
+
+<h3>Simulation &amp; Games</h3>
+<table>
+  <tr><th>Method</th><th>Path</th><th>Auth</th><th>Body</th><th>Response</th></tr>
+  <tr><td>POST</td><td>/api/simulate</td><td>Yes</td><td><code>{ opponentName, opponentPlayers[] }</code></td><td>Full game result (scores, plays, box scores)</td></tr>
+  <tr><td>GET</td><td>/api/games</td><td>No</td><td>—</td><td>Array of saved games</td></tr>
+  <tr><td>POST</td><td>/api/games/save</td><td>No</td><td><code>{ teamA, teamB, scoreA, scoreB, history }</code></td><td>Saved game document</td></tr>
+</table>
+
+<!-- ====== 8. LOCAL SETUP ====== -->
+<h2 id="local" class="section-break">8. How to Run Locally</h2>
+
+<h3>Prerequisites</h3>
+<ul>
+  <li>Node.js 18 or higher</li>
+  <li>MongoDB Community Server (or a MongoDB Atlas connection string)</li>
+  <li>A free API key from <a href="https://app.balldontlie.io">app.balldontlie.io</a></li>
+</ul>
+
+<h3>Step 1 — Clone &amp; Install</h3>
+<pre>
+git clone https://github.com/zahyaa/NBASIM_Project_Full.git
+cd NBASIM_Project_Full
+
+# Install backend dependencies
+cd server
+npm install
+
+# Install frontend dependencies
+cd ../client
+npm install
+</pre>
+
+<h3>Step 2 — Start MongoDB</h3>
+<pre>
+# macOS (Homebrew)
+brew services start mongodb/brew/mongodb-community
+
+# Linux (systemd)
+sudo systemctl start mongod
+
+# Or use MongoDB Atlas and set the connection string in .env
+</pre>
+
+<h3>Step 3 — Configure Environment</h3>
+<pre>
+cd server
+cp .env.example .env
+</pre>
+<p>Edit <code>.env</code> with your values:</p>
+<pre>
+MONGODB_URI=mongodb://localhost:27017/nbasim
+JWT_SECRET=your-secret-key-here
+BALLDONTLIE_API_KEY=your-api-key-here
+</pre>
+
+<h3>Step 4 — Start the Backend</h3>
+<pre>
+cd server
+node server.js
+</pre>
+<p>Server starts on <code>http://localhost:5001</code></p>
+
+<h3>Step 5 — Start the Frontend</h3>
+<pre>
+cd client
+NODE_OPTIONS=--openssl-legacy-provider npm start
+</pre>
+<p>React dev server starts on <code>http://localhost:3000</code> and proxies API calls to port 5001.</p>
+
+<h3>Important Notes</h3>
+<ul>
+  <li><strong>Port 5001:</strong> macOS AirPlay Receiver occupies port 5000. This project uses 5001 instead.</li>
+  <li><strong>OpenSSL flag:</strong> <code>NODE_OPTIONS=--openssl-legacy-provider</code> is required because react-scripts 3.x uses a legacy Webpack version incompatible with Node 18+'s OpenSSL 3.</li>
+</ul>
+
+<!-- ====== 9. PRODUCTION DEPLOYMENT ====== -->
+<h2 id="deploy" class="section-break">9. How to Deploy to Production</h2>
+
+<h3>Option A — Render (Recommended for simplicity)</h3>
+<ol>
+  <li>Push code to GitHub (already done at <code>github.com/zahyaa/NBASIM_Project_Full</code>)</li>
+  <li>
+    <strong>Backend:</strong> Create a "Web Service" on <a href="https://render.com">render.com</a>
+    <ul>
+      <li>Root directory: <code>server</code></li>
+      <li>Build command: <code>npm install</code></li>
+      <li>Start command: <code>node server.js</code></li>
+      <li>Set environment variables: <code>MONGODB_URI</code>, <code>JWT_SECRET</code>, <code>BALLDONTLIE_API_KEY</code>, <code>PORT=5001</code></li>
+    </ul>
+  </li>
+  <li>
+    <strong>Frontend:</strong> Create a "Static Site" on Render
+    <ul>
+      <li>Root directory: <code>client</code></li>
+      <li>Build command: <code>NODE_OPTIONS=--openssl-legacy-provider npm run build</code></li>
+      <li>Publish directory: <code>client/build</code></li>
+      <li>Add rewrite rule: <code>/*</code> → <code>/index.html</code> (for React Router)</li>
+    </ul>
+  </li>
+  <li>Update the frontend's API base URL to point to the backend's Render URL (or set up a proxy)</li>
+</ol>
+
+<h3>Option B — Heroku</h3>
+<ol>
+  <li>Add a root <code>Procfile</code>: <code>web: node server/server.js</code></li>
+  <li>Serve the React build from Express by adding static file middleware:
+    <pre>app.use(express.static(path.join(__dirname, '../client/build')));
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, '../client/build/index.html'));
+});</pre>
+  </li>
+  <li>Build the client: <code>cd client && NODE_OPTIONS=--openssl-legacy-provider npm run build</code></li>
+  <li>Set environment variables via Heroku dashboard or CLI</li>
+  <li>Deploy: <code>git push heroku main</code></li>
+</ol>
+
+<h3>Option C — VPS (DigitalOcean, AWS EC2, etc.)</h3>
+<ol>
+  <li>Install Node.js and MongoDB on the server</li>
+  <li>Clone the repo, install dependencies, build the client</li>
+  <li>Use <code>pm2</code> to run the server as a daemon: <code>pm2 start server/server.js --name basketball-sim</code></li>
+  <li>Use Nginx as a reverse proxy:
+    <pre>
+server {
+    listen 80;
+    server_name yourdomain.com;
+
+    location /api/ {
+        proxy_pass http://localhost:5001;
+    }
+    location / {
+        root /path/to/client/build;
+        try_files $uri /index.html;
+    }
+}</pre>
+  </li>
+  <li>Enable HTTPS with Let's Encrypt / Certbot</li>
+</ol>
+
+<h3>Database (Production)</h3>
+<p>Use <strong>MongoDB Atlas</strong> for a managed cloud database:</p>
+<ol>
+  <li>Create a free cluster at <a href="https://cloud.mongodb.com">cloud.mongodb.com</a></li>
+  <li>Create a database user and whitelist your server's IP (or allow 0.0.0.0/0)</li>
+  <li>Copy the connection string and set it as <code>MONGODB_URI</code></li>
+</ol>
+
+<!-- ====== 10. ENVIRONMENT VARIABLES ====== -->
+<h2 id="env" class="section-break">10. Environment Variables</h2>
+
+<table>
+  <tr><th>Variable</th><th>Required</th><th>Description</th><th>Example</th></tr>
+  <tr><td><code>MONGODB_URI</code></td><td>Yes</td><td>MongoDB connection string</td><td><code>mongodb://localhost:27017/nbasim</code></td></tr>
+  <tr><td><code>JWT_SECRET</code></td><td>Yes</td><td>Secret key for signing JWT tokens</td><td><code>my-super-secret-key</code></td></tr>
+  <tr><td><code>BALLDONTLIE_API_KEY</code></td><td>Yes</td><td>API key from balldontlie.io</td><td><code>xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx</code></td></tr>
+  <tr><td><code>PORT</code></td><td>No</td><td>Server port (default: 5001)</td><td><code>5001</code></td></tr>
+</table>
+
+<p style="text-align:center; color:#64748b; margin-top: 60px; font-size: 10pt;">
+  — End of Document —<br>
+  Basketball Simulator v1.0 &nbsp;|&nbsp; April 2026
+</p>
+
+</body>
+</html>
