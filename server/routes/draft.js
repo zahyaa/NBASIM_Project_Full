@@ -130,6 +130,7 @@ router.post('/pick', auth, async (req, res) => {
 // POST /api/draft/complete — manually complete draft early
 router.post('/complete', auth, async (req, res) => {
   try {
+    const { teamName } = req.body;
     const user = await User.findById(req.userId);
     if (!user) return res.status(404).json({ error: 'User not found' });
 
@@ -137,6 +138,7 @@ router.post('/complete', auth, async (req, res) => {
       return res.status(400).json({ error: 'Need at least 5 players to complete draft' });
     }
 
+    if (teamName) user.team.name = String(teamName).slice(0, 50);
     user.draftCompleted = true;
     await user.save();
     res.json({ message: 'Draft completed', team: user.team });

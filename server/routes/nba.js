@@ -1,7 +1,10 @@
 const express = require('express');
 const axios = require('axios');
 const { calculateRating, calculateRatingFromProfile } = require('../services/playerRating');
+const auth = require('../middleware/auth');
 const router = express.Router();
+
+router.use(auth);
 
 const API_BASE = 'https://api.balldontlie.io/v1';
 

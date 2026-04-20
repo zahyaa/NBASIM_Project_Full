@@ -107,7 +107,7 @@ function simulateGame(teamA, teamB) {
 
   // Handle overtime if tied
   let otPeriod = 0;
-  while (scoreA.total === scoreB.total) {
+  while (scoreA.total === scoreB.total && otPeriod < 10) {
     otPeriod++;
     let clock = 300; // 5 min OT
 
@@ -163,6 +163,19 @@ function simulateGame(teamA, teamB) {
         scoreB: scoreB.total,
       });
     }
+  }
+
+  // Tie-break after max overtime
+  if (scoreA.total === scoreB.total) {
+    scoreA.total += 1;
+    plays.push({
+      quarter: 'Final',
+      clock: '0:00',
+      team: teamA.name,
+      text: `${teamA.name} wins in a tiebreaker!`,
+      scoreA: scoreA.total,
+      scoreB: scoreB.total,
+    });
   }
 
   // Determine star player

@@ -1,8 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const Game = require('../models/Game');
+const auth = require('../middleware/auth');
 
-router.post('/save', async (req, res) => {
+router.post('/save', auth, async (req, res) => {
   try {
     const { teamA, teamB, scoreA, scoreB, history } = req.body;
     const game = new Game({ teamA, teamB, scoreA, scoreB, history });
@@ -13,7 +14,7 @@ router.post('/save', async (req, res) => {
   }
 });
 
-router.get('/', async (req, res) => {
+router.get('/', auth, async (req, res) => {
   try {
     const games = await Game.find().sort({ timestamp: -1 });
     res.json(games);

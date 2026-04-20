@@ -48,15 +48,6 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    // Reset roster and draft on every login
-    user.team.players = [];
-    user.team.name = '';
-    user.draftCompleted = false;
-    user.wins = 0;
-    user.losses = 0;
-    user.gamesPlayed = [];
-    await user.save();
-
     const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, { expiresIn: '7d' });
     res.json({ token, user });
   } catch (err) {

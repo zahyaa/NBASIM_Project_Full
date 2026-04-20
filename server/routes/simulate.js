@@ -18,17 +18,25 @@ router.post('/', auth, async (req, res) => {
     }
 
     const { opponentName, opponentPlayers } = req.body;
-    if (!opponentName || !opponentPlayers || opponentPlayers.length < 5) {
+    if (!opponentName || !Array.isArray(opponentPlayers) || opponentPlayers.length < 5) {
       return res.status(400).json({ error: 'Opponent team data required (name + at least 5 players)' });
     }
+
+    const sanitizedOpponents = opponentPlayers.slice(0, 15).map(p => ({
+      playerId: Number(p.playerId),
+      firstName: String(p.firstName || '').slice(0, 50),
+      lastName: String(p.lastName || '').slice(0, 50),
+      position: String(p.position || '').slice(0, 5),
+      rating: Math.min(99, Math.max(1, Number(p.rating) || 50)),
+    }));
 
     const teamA = {
       name: user.team.name || `${user.username}'s Team`,
       players: user.team.players,
     };
     const teamB = {
-      name: opponentName,
-      players: opponentPlayers,
+      name: String(opponentName).slice(0, 100),
+      players: sanitizedOpponents,
     };
 
     const result = simulateGame(teamA, teamB);

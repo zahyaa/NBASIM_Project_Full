@@ -1,11 +1,11 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 
 export default function DraftPage() {
   const { token, user, setUser } = useAuth();
   const navigate = useNavigate();
-  const [pool, setPool] = useState([]);
+  const [rawPool, setRawPool] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [picking, setPicking] = useState(false);
@@ -17,6 +17,11 @@ export default function DraftPage() {
   const [setupDone, setSetupDone] = useState(!!(user?.conference && user?.league));
 
   const roster = user?.team?.players || [];
+
+  const pool = useMemo(() => {
+    const draftedIds = new Set(roster.map(p => p.playerId));
+    return rawPool.filter(p => !draftedIds.has(p.id));
+  }, [rawPool, roster]);
 
   const handleSetup = async () => {
     if (!conference || !league) return;
@@ -56,14 +61,12 @@ export default function DraftPage() {
       });
       if (!res.ok) throw new Error('Failed to load draft pool');
       const data = await res.json();
-      // Filter out already-drafted players
-      const draftedIds = new Set(roster.map(p => p.playerId));
-      setPool(data.filter(p => !draftedIds.has(p.id)));
+      setRawPool(data);
     } catch (err) {
       setError(err.message);
     }
     setLoading(false);
-  }, [token, user?.season, user?.conference, conference, setupDone, roster]);
+  }, [token, user?.season, user?.conference, conference, setupDone]);
 
   useEffect(() => {
     if (setupDone) fetchPool();
@@ -102,7 +105,7 @@ export default function DraftPage() {
       });
       const me = await meRes.json();
       setUser(me);
-      setPool(prev => prev.filter(p => p.id !== player.id));
+      setRawPool(prev => prev.filter(p => p.id !== player.id));
     } catch (err) {
       setError(err.message);
     }
@@ -117,6 +120,7 @@ export default function DraftPage() {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
+        body: JSON.stringify({ teamName }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
