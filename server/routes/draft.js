@@ -10,10 +10,10 @@ function apiHeaders() {
   return { Authorization: process.env.BALLDONTLIE_API_KEY };
 }
 
-// POST /api/draft/setup — save conference & league selection
+// POST /api/draft/setup — save conference, league, city, coach, draft type
 router.post('/setup', auth, async (req, res) => {
   try {
-    const { conference, league } = req.body;
+    const { conference, league, city, coach, draftType } = req.body;
     if (!conference || !league) {
       return res.status(400).json({ error: 'Conference and league are required' });
     }
@@ -21,6 +21,10 @@ router.post('/setup', auth, async (req, res) => {
     if (!user) return res.status(404).json({ error: 'User not found' });
     user.conference = conference;
     user.league = league;
+    if (city) user.team.city = String(city).slice(0, 50);
+    if (coach) user.team.coach = String(coach).slice(0, 60);
+    if (draftType) user.draftType = draftType;
+    user.gameMode = draftType === 'season' ? 'season' : 'fantasy';
     await user.save();
     res.json({ message: 'Setup saved', conference, league });
   } catch (err) {

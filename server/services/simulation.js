@@ -198,4 +198,139 @@ function simulateGame(teamA, teamB) {
   };
 }
 
-module.exports = { simulateGame, pickWeightedPlayer };
+/**
+ * 1-on-1 simulation: two players, first to targetScore (default 21).
+ */
+function simulate1v1(playerA, playerB, targetScore = 21) {
+  const scoreA = { total: 0 };
+  const scoreB = { total: 0 };
+  const plays = [];
+  let possession = Math.random() < 0.5;
+
+  while (scoreA.total < targetScore && scoreB.total < targetScore && plays.length < 500) {
+    const attacker = possession ? playerA : playerB;
+    const defender = possession ? playerB : playerA;
+    const atkScore = possession ? scoreA : scoreB;
+    const defRating = defender.rating || 50;
+    const atkRating = attacker.rating || 50;
+
+    const shotChance = 0.30 + (atkRating / 99) * 0.30 - (defRating / 99) * 0.10;
+    const roll = Math.random();
+    let points = 0;
+    let text = '';
+
+    if (roll < shotChance * 0.55) {
+      points = 2;
+      text = `${attacker.firstName} ${attacker.lastName} scores a mid-range jumper!`;
+    } else if (roll < shotChance * 0.75) {
+      points = 3;
+      text = `${attacker.firstName} ${attacker.lastName} drains a 3-pointer!`;
+    } else if (roll < shotChance * 0.85) {
+      points = 1;
+      text = `${attacker.firstName} ${attacker.lastName} hits a free throw.`;
+    } else if (roll < 0.7) {
+      text = `${attacker.firstName} ${attacker.lastName} misses the shot.`;
+    } else if (roll < 0.82) {
+      text = `${defender.firstName} ${defender.lastName} blocks the shot!`;
+      possession = !possession;
+    } else {
+      text = `${attacker.firstName} ${attacker.lastName} turns it over.`;
+      possession = !possession;
+    }
+
+    if (points > 0) {
+      atkScore.total += points;
+    } else if (text.includes('misses')) {
+      possession = !possession;
+    }
+
+    plays.push({ text, scoreA: scoreA.total, scoreB: scoreB.total });
+  }
+
+  const winner = scoreA.total >= targetScore ? playerA : playerB;
+  return {
+    playerA: `${playerA.firstName} ${playerA.lastName}`,
+    playerB: `${playerB.firstName} ${playerB.lastName}`,
+    scoreA: scoreA.total,
+    scoreB: scoreB.total,
+    plays,
+    winner: `${winner.firstName} ${winner.lastName}`,
+    targetScore,
+  };
+}
+
+/**
+ * Blacktop simulation: small-team half-court game to a target score (max 21).
+ */
+function simulateBlacktop(teamA, teamB, targetScore = 21) {
+  targetScore = Math.min(21, Math.max(5, targetScore));
+  const scoreA = { total: 0, players: {} };
+  const scoreB = { total: 0, players: {} };
+
+  for (const p of teamA.players) {
+    scoreA.players[p.playerId] = { name: `${p.firstName} ${p.lastName}`, pts: 0 };
+  }
+  for (const p of teamB.players) {
+    scoreB.players[p.playerId] = { name: `${p.firstName} ${p.lastName}`, pts: 0 };
+  }
+
+  const plays = [];
+  let possession = Math.random() < 0.5;
+
+  while (scoreA.total < targetScore && scoreB.total < targetScore && plays.length < 500) {
+    const roster = possession ? teamA.players : teamB.players;
+    const box = possession ? scoreA : scoreB;
+    const teamName = possession ? teamA.name : teamB.name;
+    const player = pickWeightedPlayer(roster);
+    const pBox = box.players[player.playerId];
+
+    const shotChance = 0.32 + (player.rating / 99) * 0.28;
+    const roll = Math.random();
+    let points = 0;
+    let text = '';
+
+    if (roll < shotChance * 0.5) {
+      points = 2;
+      text = `${player.firstName} ${player.lastName} scores a bucket!`;
+    } else if (roll < shotChance * 0.75) {
+      points = 3;
+      text = `${player.firstName} ${player.lastName} hits a 3!`;
+    } else if (roll < shotChance * 0.85) {
+      points = 1;
+      text = `${player.firstName} ${player.lastName} hits a free throw.`;
+    } else if (roll < 0.72) {
+      text = `${player.firstName} ${player.lastName} misses.`;
+    } else if (roll < 0.82) {
+      const other = roster.length > 1
+        ? roster.find(p2 => p2.playerId !== player.playerId) || player
+        : player;
+      points = 2;
+      text = `${other.firstName} ${other.lastName} finds ${player.firstName} ${player.lastName} for the easy score!`;
+    } else {
+      text = `${player.firstName} ${player.lastName} turns it over.`;
+    }
+
+    if (points > 0) {
+      pBox.pts += points;
+      box.total += points;
+    } else {
+      possession = !possession;
+    }
+
+    plays.push({ team: teamName, text, scoreA: scoreA.total, scoreB: scoreB.total });
+  }
+
+  return {
+    teamA: teamA.name,
+    teamB: teamB.name,
+    scoreA: scoreA.total,
+    scoreB: scoreB.total,
+    boxScoreA: scoreA.players,
+    boxScoreB: scoreB.players,
+    plays,
+    winner: scoreA.total >= targetScore ? teamA.name : teamB.name,
+    targetScore,
+  };
+}
+
+module.exports = { simulateGame, simulate1v1, simulateBlacktop, pickWeightedPlayer };

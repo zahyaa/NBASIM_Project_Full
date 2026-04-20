@@ -1,4 +1,4 @@
-require('dotenv').config();
+require('dotenv').config({ path: require('path').join(__dirname, '.env') });
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
@@ -15,6 +15,7 @@ mongoose.connect(MONGODB_URI)
   .then(() => console.log('Connected to MongoDB'))
   .catch(err => { console.error('MongoDB connection error:', err.message); process.exit(1); });
 
+app.set('trust proxy', 1);
 app.use(cors());
 app.use(express.json());
 
@@ -23,6 +24,7 @@ const authRoutes = require('./routes/auth');
 const nbaRoutes = require('./routes/nba');
 const draftRoutes = require('./routes/draft');
 const simulateRoutes = require('./routes/simulate');
+const settingsRoutes = require('./routes/settings');
 
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -35,6 +37,7 @@ app.use('/api/auth', authLimiter, authRoutes);
 app.use('/api/nba', nbaRoutes);
 app.use('/api/draft', draftRoutes);
 app.use('/api/simulate', simulateRoutes);
+app.use('/api/settings', settingsRoutes);
 
 const PORT = process.env.PORT || 5001;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));

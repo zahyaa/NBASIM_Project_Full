@@ -22,6 +22,77 @@ router.get('/teams', async (req, res) => {
   }
 });
 
+// GET /api/nba/players/search?q=LeBron — search players by name
+router.get('/players/search', async (req, res) => {
+  try {
+    const q = String(req.query.q || '').trim();
+    if (!q) return res.status(400).json({ error: 'Search query required' });
+    const params = { search: q, per_page: 50 };
+    if (req.query.cursor) params.cursor = Number(req.query.cursor);
+    const { data } = await axios.get(`${API_BASE}/players`, { headers: apiHeaders(), params });
+
+    const players = data.data.map(p => ({
+      id: p.id,
+      firstName: p.first_name,
+      lastName: p.last_name,
+      position: p.position || 'N/A',
+      team: p.team ? p.team.full_name : 'Free Agent',
+      teamId: p.team ? p.team.id : null,
+      rating: calculateRatingFromProfile(p),
+      height: p.height,
+      weight: p.weight,
+      jersey: p.jersey_number,
+      country: p.country,
+      draftYear: p.draft_year,
+      draftRound: p.draft_round,
+      draftNumber: p.draft_number,
+    }));
+    res.json({ data: players, meta: data.meta });
+  } catch (err) {
+    res.status(502).json({ error: 'Failed to search players', details: err.message });
+  }
+});
+
+// GET /api/nba/players/:id/bio — full player profile + career stats
+router.get('/players/:id/bio', async (req, res) => {
+  try {
+    const { data: playerData } = await axios.get(`${API_BASE}/players/${req.params.id}`, {
+      headers: apiHeaders(),
+    });
+    const player = playerData.data;
+
+    // Try to get current season stats
+    let seasonAvg = null;
+    try {
+      const { data: statsData } = await axios.get(
+        `${API_BASE}/season_averages?season=2024&player_ids[]=${player.id}`,
+        { headers: apiHeaders() }
+      );
+      seasonAvg = statsData.data[0] || null;
+    } catch { /* free tier fallback */ }
+
+    res.json({
+      id: player.id,
+      firstName: player.first_name,
+      lastName: player.last_name,
+      position: player.position || 'N/A',
+      team: player.team ? player.team.full_name : 'Free Agent',
+      conference: player.team ? player.team.conference : '',
+      height: player.height,
+      weight: player.weight,
+      jersey: player.jersey_number,
+      country: player.country,
+      draftYear: player.draft_year,
+      draftRound: player.draft_round,
+      draftNumber: player.draft_number,
+      rating: seasonAvg ? calculateRating(seasonAvg) : calculateRatingFromProfile(player),
+      seasonAverage: seasonAvg,
+    });
+  } catch (err) {
+    res.status(502).json({ error: 'Failed to fetch player bio', details: err.message });
+  }
+});
+
 // GET /api/nba/players?team_id=1&per_page=25 — players on a team
 router.get('/players', async (req, res) => {
   try {
