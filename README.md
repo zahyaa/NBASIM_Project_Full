@@ -152,9 +152,17 @@ Visit [http://localhost:3000](http://localhost:3000)
 
 ---
 
-![Game Screenshot](./assets/screenshots/b1.png)
+## 📸 Screenshots
 
-![Game Screenshot](./assets/screenshots/b2.png)
+![Screenshot 1](./assets/screenshots/screenshot1.png)
+
+![Screenshot 2](./assets/screenshots/screenshot2.png)
+
+![Screenshot 3](./assets/screenshots/screenshot3.png)
+
+![Screenshot 4](./assets/screenshots/screenshot4.png)
+
+![Screenshot 5](./assets/screenshots/screenshot5.png)
 
 ---
 

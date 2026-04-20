@@ -1,6 +1,6 @@
 /**
- * Stat-based game simulation engine.
- * Uses player ratings to weight scoring probability.
+ * Enhanced stat-based game simulation engine.
+ * Tracks ESPN-style box scores, team stats, shot chart, quarter scores, win probability.
  */
 
 function pickWeightedPlayer(players) {
@@ -13,112 +13,60 @@ function pickWeightedPlayer(players) {
   return players[players.length - 1];
 }
 
+function initPlayerBox(p) {
+  return {
+    name: `${p.firstName} ${p.lastName}`,
+    playerId: p.playerId,
+    pts: 0, reb: 0, ast: 0, stl: 0, blk: 0,
+    fgm: 0, fga: 0, fg3m: 0, fg3a: 0, ftm: 0, fta: 0,
+    turnover: 0, min: 0, pf: 0,
+  };
+}
+
+function initTeamStats() {
+  return {
+    pts: 0, fgm: 0, fga: 0, fg3m: 0, fg3a: 0, ftm: 0, fta: 0,
+    reb: 0, ast: 0, stl: 0, blk: 0, turnover: 0, pf: 0,
+    largestLead: 0, fastBreakPts: 0, ptsInPaint: 0, benchPts: 0,
+    quarterScores: [],
+  };
+}
+
+// Random court position for shot chart (x: 0-500, y: 0-470)
+function randomShotLocation(shotType) {
+  if (shotType === '3pt') {
+    // Arc: outside the 3-point line
+    const angle = Math.random() * Math.PI;
+    const r = 180 + Math.random() * 50;
+    return { x: Math.round(250 + r * Math.cos(angle)), y: Math.round(420 - r * Math.sin(angle)) };
+  }
+  if (shotType === 'paint') {
+    return { x: Math.round(200 + Math.random() * 100), y: Math.round(350 + Math.random() * 90) };
+  }
+  // Mid-range
+  const angle = Math.random() * Math.PI;
+  const r = 80 + Math.random() * 100;
+  return { x: Math.round(250 + r * Math.cos(angle)), y: Math.round(400 - r * Math.sin(angle)) };
+}
+
 function simulateGame(teamA, teamB) {
   const QUARTERS = 4;
   const SECONDS_PER_QUARTER = 720;
 
-  const scoreA = { total: 0, players: {} };
-  const scoreB = { total: 0, players: {} };
+  const boxA = {}, boxB = {};
+  const statsA = initTeamStats(), statsB = initTeamStats();
 
-  // Init player box scores
-  for (const p of teamA.players) {
-    scoreA.players[p.playerId] = { name: `${p.firstName} ${p.lastName}`, pts: 0, reb: 0, ast: 0 };
-  }
-  for (const p of teamB.players) {
-    scoreB.players[p.playerId] = { name: `${p.firstName} ${p.lastName}`, pts: 0, reb: 0, ast: 0 };
-  }
+  for (const p of teamA.players) boxA[p.playerId] = initPlayerBox(p);
+  for (const p of teamB.players) boxB[p.playerId] = initPlayerBox(p);
 
   const plays = [];
+  const shots = [];        // Shot chart data
+  const winProb = [];       // Win probability timeline
+  let scoreATot = 0, scoreBTot = 0;
 
   for (let q = 1; q <= QUARTERS; q++) {
     let clock = SECONDS_PER_QUARTER;
-
-    while (clock > 0) {
-      const elapsed = Math.floor(Math.random() * 20) + 5; // 5–24 sec
-      clock = Math.max(0, clock - elapsed);
-
-      const isTeamA = Math.random() < 0.5;
-      const roster = isTeamA ? teamA.players : teamB.players;
-      const box = isTeamA ? scoreA : scoreB;
-      const teamName = isTeamA ? teamA.name : teamB.name;
-
-      // Pick active players (top 5 by rating)
-      const active = roster.slice(0, 5);
-      const player = pickWeightedPlayer(active);
-      const pBox = box.players[player.playerId];
-
-      // Shot outcome weighted by rating
-      const shotChance = 0.35 + (player.rating / 99) * 0.25; // 35%–60%
-      const roll = Math.random();
-
-      let points = 0;
-      let playText = '';
-
-      if (roll < shotChance * 0.6) {
-        // 2-pointer made
-        points = 2;
-        playText = `${player.firstName} ${player.lastName} drives and scores a 2-pointer!`;
-      } else if (roll < shotChance * 0.8) {
-        // 3-pointer made
-        points = 3;
-        playText = `${player.firstName} ${player.lastName} drains a 3-pointer!`;
-      } else if (roll < shotChance * 0.9) {
-        // Free throws
-        points = 1;
-        playText = `${player.firstName} ${player.lastName} hits a free throw.`;
-      } else if (roll < 0.75) {
-        // Missed shot
-        playText = `${player.firstName} ${player.lastName} misses the shot.`;
-        // Rebound
-        const rebTeam = Math.random() < 0.6 ? roster : (isTeamA ? teamB.players : teamA.players);
-        const rebounder = pickWeightedPlayer(rebTeam.slice(0, 5));
-        const rebBox = (rebTeam === roster ? box : (isTeamA ? scoreB : scoreA));
-        rebBox.players[rebounder.playerId].reb += 1;
-        playText += ` ${rebounder.firstName} ${rebounder.lastName} grabs the rebound.`;
-      } else if (roll < 0.85) {
-        // Assist play
-        const assister = active.find(p => p.playerId !== player.playerId) || player;
-        const assistBox = box.players[assister.playerId];
-        points = 2;
-        assistBox.ast += 1;
-        playText = `${assister.firstName} ${assister.lastName} dishes to ${player.firstName} ${player.lastName} for the easy bucket!`;
-      } else {
-        // Turnover
-        playText = `${player.firstName} ${player.lastName} turns the ball over.`;
-      }
-
-      if (points > 0) {
-        pBox.pts += points;
-        box.total += points;
-      }
-
-      const mins = Math.floor(clock / 60);
-      const secs = clock % 60;
-      plays.push({
-        quarter: q,
-        clock: `${mins}:${String(secs).padStart(2, '0')}`,
-        team: teamName,
-        text: playText,
-        scoreA: scoreA.total,
-        scoreB: scoreB.total,
-      });
-    }
-  }
-
-  // Handle overtime if tied
-  let otPeriod = 0;
-  while (scoreA.total === scoreB.total && otPeriod < 10) {
-    otPeriod++;
-    let clock = 300; // 5 min OT
-
-    plays.push({
-      quarter: `OT${otPeriod}`,
-      clock: '5:00',
-      team: '',
-      text: `--- Overtime ${otPeriod} begins! ---`,
-      scoreA: scoreA.total,
-      scoreB: scoreB.total,
-    });
+    const qStartA = scoreATot, qStartB = scoreBTot;
 
     while (clock > 0) {
       const elapsed = Math.floor(Math.random() * 20) + 5;
@@ -126,11 +74,175 @@ function simulateGame(teamA, teamB) {
 
       const isTeamA = Math.random() < 0.5;
       const roster = isTeamA ? teamA.players : teamB.players;
-      const box = isTeamA ? scoreA : scoreB;
+      const box = isTeamA ? boxA : boxB;
+      const tStats = isTeamA ? statsA : statsB;
+      const oStats = isTeamA ? statsB : statsA;
+      const oBox = isTeamA ? boxB : boxA;
       const teamName = isTeamA ? teamA.name : teamB.name;
+      const oRoster = isTeamA ? teamB.players : teamA.players;
+
       const active = roster.slice(0, 5);
       const player = pickWeightedPlayer(active);
-      const pBox = box.players[player.playerId];
+      const pBox = box[player.playerId];
+      pBox.min += Math.round(elapsed / 60 * 10) / 10;
+
+      const shotChance = 0.35 + (player.rating / 99) * 0.25;
+      const roll = Math.random();
+
+      let points = 0;
+      let playText = '';
+      let playType = '';
+
+      if (roll < shotChance * 0.45) {
+        // 2-pointer in paint
+        points = 2;
+        pBox.fgm++; pBox.fga++; tStats.fgm++; tStats.fga++;
+        tStats.ptsInPaint += 2;
+        playText = `${player.firstName} ${player.lastName} drives and scores!`;
+        playType = 'score';
+        shots.push({ team: teamName, x: randomShotLocation('paint').x, y: randomShotLocation('paint').y, made: true, type: '2pt' });
+      } else if (roll < shotChance * 0.65) {
+        // Mid-range 2
+        points = 2;
+        pBox.fgm++; pBox.fga++; tStats.fgm++; tStats.fga++;
+        playText = `${player.firstName} ${player.lastName} hits a mid-range jumper!`;
+        playType = 'score';
+        shots.push({ team: teamName, ...randomShotLocation('mid'), made: true, type: '2pt' });
+      } else if (roll < shotChance * 0.8) {
+        // 3-pointer
+        points = 3;
+        pBox.fgm++; pBox.fga++; pBox.fg3m++; pBox.fg3a++;
+        tStats.fgm++; tStats.fga++; tStats.fg3m++; tStats.fg3a++;
+        playText = `${player.firstName} ${player.lastName} drains a 3-pointer!`;
+        playType = 'score';
+        shots.push({ team: teamName, ...randomShotLocation('3pt'), made: true, type: '3pt' });
+      } else if (roll < shotChance * 0.88) {
+        // Free throws (2 attempts)
+        const ft1 = Math.random() < 0.75;
+        const ft2 = Math.random() < 0.75;
+        pBox.fta += 2; tStats.fta += 2;
+        if (ft1) { pBox.ftm++; tStats.ftm++; points++; }
+        if (ft2) { pBox.ftm++; tStats.ftm++; points++; }
+        playText = `${player.firstName} ${player.lastName} goes to the line: ${ft1 ? '✓' : '✗'}/${ft2 ? '✓' : '✗'} (${points} pts)`;
+        playType = points > 0 ? 'score' : 'miss';
+      } else if (roll < 0.72) {
+        // Missed 2pt
+        pBox.fga++; tStats.fga++;
+        playText = `${player.firstName} ${player.lastName} misses the shot.`;
+        playType = 'miss';
+        shots.push({ team: teamName, ...randomShotLocation('mid'), made: false, type: '2pt' });
+        // Rebound
+        const offReb = Math.random() < 0.3;
+        const rebRoster = offReb ? active : oRoster.slice(0, 5);
+        const rebounder = pickWeightedPlayer(rebRoster);
+        const rebBox = offReb ? box[rebounder.playerId] : oBox[rebounder.playerId];
+        const rebStats = offReb ? tStats : oStats;
+        rebBox.reb++; rebStats.reb++;
+        playText += ` ${rebounder.firstName} ${rebounder.lastName} grabs the rebound.`;
+      } else if (roll < 0.78) {
+        // Missed 3pt
+        pBox.fga++; pBox.fg3a++; tStats.fga++; tStats.fg3a++;
+        playText = `${player.firstName} ${player.lastName} misses the three.`;
+        playType = 'miss';
+        shots.push({ team: teamName, ...randomShotLocation('3pt'), made: false, type: '3pt' });
+        const rebounder = pickWeightedPlayer(oRoster.slice(0, 5));
+        oBox[rebounder.playerId].reb++; oStats.reb++;
+        playText += ` ${rebounder.firstName} ${rebounder.lastName} rebounds.`;
+      } else if (roll < 0.83) {
+        // Assist + score
+        const assister = active.find(p => p.playerId !== player.playerId) || player;
+        box[assister.playerId].ast++; tStats.ast++;
+        points = 2;
+        pBox.fgm++; pBox.fga++; tStats.fgm++; tStats.fga++;
+        playText = `${assister.firstName} ${assister.lastName} finds ${player.firstName} ${player.lastName} for the easy bucket!`;
+        playType = 'score';
+        shots.push({ team: teamName, ...randomShotLocation('paint'), made: true, type: '2pt' });
+      } else if (roll < 0.87) {
+        // Steal
+        const stealer = pickWeightedPlayer(oRoster.slice(0, 5));
+        oBox[stealer.playerId].stl++; oStats.stl++;
+        pBox.turnover++; tStats.turnover++;
+        playText = `${stealer.firstName} ${stealer.lastName} steals it from ${player.firstName} ${player.lastName}!`;
+        playType = 'steal';
+      } else if (roll < 0.91) {
+        // Block
+        const blocker = pickWeightedPlayer(oRoster.slice(0, 5));
+        oBox[blocker.playerId].blk++; oStats.blk++;
+        pBox.fga++; tStats.fga++;
+        playText = `${blocker.firstName} ${blocker.lastName} blocks ${player.firstName} ${player.lastName}!`;
+        playType = 'block';
+        shots.push({ team: teamName, ...randomShotLocation('paint'), made: false, type: '2pt', blocked: true });
+      } else if (roll < 0.96) {
+        // Turnover
+        pBox.turnover++; tStats.turnover++;
+        playText = `${player.firstName} ${player.lastName} turns the ball over.`;
+        playType = 'turnover';
+      } else {
+        // Foul
+        pBox.pf++; tStats.pf++;
+        playText = `Foul on ${player.firstName} ${player.lastName}.`;
+        playType = 'foul';
+      }
+
+      if (points > 0) {
+        pBox.pts += points;
+        tStats.pts += points;
+        if (isTeamA) scoreATot += points; else scoreBTot += points;
+      }
+
+      // Track largest lead
+      const diff = isTeamA ? scoreATot - scoreBTot : scoreBTot - scoreATot;
+      if (diff > tStats.largestLead) tStats.largestLead = diff;
+
+      const mins = Math.floor(clock / 60);
+      const secs = clock % 60;
+      const clockStr = `${mins}:${String(secs).padStart(2, '0')}`;
+
+      plays.push({
+        quarter: q, clock: clockStr, team: teamName, text: playText,
+        scoreA: scoreATot, scoreB: scoreBTot, type: playType,
+      });
+
+      // Win probability snapshot every ~5 plays
+      if (plays.length % 5 === 0) {
+        const totalTime = QUARTERS * SECONDS_PER_QUARTER;
+        const elapsed2 = (q - 1) * SECONDS_PER_QUARTER + (SECONDS_PER_QUARTER - clock);
+        const pct = elapsed2 / totalTime;
+        const scoreDiff = scoreATot - scoreBTot;
+        // Logistic model: higher lead + later game = more certain
+        const k = 0.15 + pct * 0.35;
+        const probA = 1 / (1 + Math.exp(-k * scoreDiff));
+        winProb.push({ time: +(pct * 100).toFixed(1), probA: +(probA * 100).toFixed(1), probB: +((1 - probA) * 100).toFixed(1) });
+      }
+    }
+
+    // Quarter scores
+    statsA.quarterScores.push(scoreATot - qStartA);
+    statsB.quarterScores.push(scoreBTot - qStartB);
+  }
+
+  // Overtime
+  let otPeriod = 0;
+  while (scoreATot === scoreBTot && otPeriod < 10) {
+    otPeriod++;
+    let clock = 300;
+    const qStartA2 = scoreATot, qStartB2 = scoreBTot;
+
+    plays.push({ quarter: `OT${otPeriod}`, clock: '5:00', team: '', text: `--- Overtime ${otPeriod} begins! ---`, scoreA: scoreATot, scoreB: scoreBTot, type: 'info' });
+
+    while (clock > 0) {
+      const elapsed = Math.floor(Math.random() * 20) + 5;
+      clock = Math.max(0, clock - elapsed);
+
+      const isTeamA = Math.random() < 0.5;
+      const roster = isTeamA ? teamA.players : teamB.players;
+      const box = isTeamA ? boxA : boxB;
+      const tStats = isTeamA ? statsA : statsB;
+      const teamName = isTeamA ? teamA.name : teamB.name;
+
+      const active = roster.slice(0, 5);
+      const player = pickWeightedPlayer(active);
+      const pBox = box[player.playerId];
 
       const shotChance = 0.35 + (player.rating / 99) * 0.25;
       const roll = Math.random();
@@ -138,63 +250,63 @@ function simulateGame(teamA, teamB) {
       let playText = '';
 
       if (roll < shotChance * 0.6) {
-        points = 2;
-        playText = `${player.firstName} ${player.lastName} scores a 2-pointer!`;
+        points = 2; pBox.fgm++; pBox.fga++; tStats.fgm++; tStats.fga++;
+        playText = `${player.firstName} ${player.lastName} scores!`;
       } else if (roll < shotChance * 0.8) {
-        points = 3;
-        playText = `${player.firstName} ${player.lastName} hits a 3-pointer!`;
+        points = 3; pBox.fgm++; pBox.fga++; pBox.fg3m++; pBox.fg3a++;
+        tStats.fgm++; tStats.fga++; tStats.fg3m++; tStats.fg3a++;
+        playText = `${player.firstName} ${player.lastName} hits a 3!`;
       } else {
+        pBox.fga++; tStats.fga++;
         playText = `${player.firstName} ${player.lastName} misses.`;
       }
 
       if (points > 0) {
-        pBox.pts += points;
-        box.total += points;
+        pBox.pts += points; tStats.pts += points;
+        if (isTeamA) scoreATot += points; else scoreBTot += points;
       }
 
       const mins = Math.floor(clock / 60);
       const secs = clock % 60;
-      plays.push({
-        quarter: `OT${otPeriod}`,
-        clock: `${mins}:${String(secs).padStart(2, '0')}`,
-        team: teamName,
-        text: playText,
-        scoreA: scoreA.total,
-        scoreB: scoreB.total,
-      });
+      plays.push({ quarter: `OT${otPeriod}`, clock: `${mins}:${String(secs).padStart(2, '0')}`, team: teamName, text: playText, scoreA: scoreATot, scoreB: scoreBTot, type: points > 0 ? 'score' : 'miss' });
     }
+
+    statsA.quarterScores.push(scoreATot - qStartA2);
+    statsB.quarterScores.push(scoreBTot - qStartB2);
   }
 
-  // Tie-break after max overtime
-  if (scoreA.total === scoreB.total) {
-    scoreA.total += 1;
-    plays.push({
-      quarter: 'Final',
-      clock: '0:00',
-      team: teamA.name,
-      text: `${teamA.name} wins in a tiebreaker!`,
-      scoreA: scoreA.total,
-      scoreB: scoreB.total,
-    });
+  if (scoreATot === scoreBTot) {
+    scoreATot += 1; statsA.pts += 1;
+    plays.push({ quarter: 'Final', clock: '0:00', team: teamA.name, text: `${teamA.name} wins in a tiebreaker!`, scoreA: scoreATot, scoreB: scoreBTot, type: 'info' });
   }
 
-  // Determine star player
-  const allPlayerStats = [
-    ...Object.values(scoreA.players).map(p => ({ ...p, team: teamA.name })),
-    ...Object.values(scoreB.players).map(p => ({ ...p, team: teamB.name })),
-  ];
-  allPlayerStats.sort((a, b) => b.pts - a.pts);
+  // Game leaders
+  const allBoxA = Object.values(boxA);
+  const allBoxB = Object.values(boxB);
+  const allPlayers = [...allBoxA.map(p => ({ ...p, teamSide: 'A' })), ...allBoxB.map(p => ({ ...p, teamSide: 'B' }))];
+  const leaders = {
+    points: { A: allBoxA.sort((a, b) => b.pts - a.pts)[0], B: allBoxB.sort((a, b) => b.pts - a.pts)[0] },
+    rebounds: { A: allBoxA.sort((a, b) => b.reb - a.reb)[0], B: allBoxB.sort((a, b) => b.reb - a.reb)[0] },
+    assists: { A: allBoxA.sort((a, b) => b.ast - a.ast)[0], B: allBoxB.sort((a, b) => b.ast - a.ast)[0] },
+  };
+
+  allPlayers.sort((a, b) => b.pts - a.pts);
 
   return {
     teamA: teamA.name,
     teamB: teamB.name,
-    scoreA: scoreA.total,
-    scoreB: scoreB.total,
-    boxScoreA: scoreA.players,
-    boxScoreB: scoreB.players,
+    scoreA: scoreATot,
+    scoreB: scoreBTot,
+    boxScoreA: boxA,
+    boxScoreB: boxB,
+    teamStatsA: statsA,
+    teamStatsB: statsB,
     plays,
-    starPlayer: allPlayerStats[0],
-    winner: scoreA.total > scoreB.total ? teamA.name : teamB.name,
+    shots,
+    winProbability: winProb,
+    leaders,
+    starPlayer: allPlayers[0],
+    winner: scoreATot > scoreBTot ? teamA.name : teamB.name,
   };
 }
 

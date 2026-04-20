@@ -6,7 +6,7 @@ const MODES = [
   {
     key: 'fantasy',
     title: 'Fantasy Draft',
-    desc: 'Draft players from all eras. Build your dream team and compete against 31 CPU teams.',
+    desc: 'Draft legends from every era. MJ, LeBron, Wilt — all on one roster. Dream Team presets included.',
     icon: '\u{1F3C6}',
     path: '/draft',
     color: '#f97316',
@@ -22,7 +22,7 @@ const MODES = [
   {
     key: '1v1',
     title: 'One on One',
-    desc: 'Pick a player and go head-to-head against the CPU. First to 21 wins.',
+    desc: 'Instant matchups — MJ vs LeBron, Kobe vs AI. Popular matchups, random mode, and rematch.',
     icon: '\u{1F94A}',
     path: '/1v1',
     color: '#3b82f6',
@@ -30,7 +30,7 @@ const MODES = [
   {
     key: 'blacktop',
     title: 'Blacktop',
-    desc: 'Pick 3 or 5 players for a half-court battle. Game to 21.',
+    desc: 'Streetball with any NBA player ever. 1v1 to 5v5 half-court. Mix eras freely.',
     icon: '\u{1F525}',
     path: '/blacktop',
     color: '#ef4444',
@@ -38,7 +38,7 @@ const MODES = [
   {
     key: 'bio',
     title: 'Players Bio',
-    desc: 'Search and view detailed profiles of any NBA player, active or retired.',
+    desc: 'Real NBA data. Search any player from 1946 to today. Stats, ratings, era badges.',
     icon: '\u{1F4CB}',
     path: '/players',
     color: '#a855f7',
@@ -68,7 +68,8 @@ export default function MainMenu() {
   return (
     <div style={styles.container}>
       <div style={styles.header}>
-        <h1 style={styles.title}>Basketball Simulator</h1>
+        <h1 style={styles.title}>NBA SIM</h1>
+        <p style={styles.tagline}>Every player. Every era. Your rules.</p>
         <p style={styles.subtitle}>Welcome, {user?.username}. Choose your game mode.</p>
         {user?.draftCompleted && (
           <p style={styles.record}>
@@ -103,7 +104,8 @@ const styles = {
     padding: '40px 24px',
   },
   header: { textAlign: 'center', marginBottom: 40 },
-  title: { color: '#f97316', fontSize: 42, margin: '0 0 8px', fontWeight: 800, letterSpacing: 2 },
+  title: { color: '#f97316', fontSize: 48, margin: '0 0 4px', fontWeight: 800, letterSpacing: 3 },
+  tagline: { color: '#e2e8f0', margin: '0 0 8px', fontSize: 18, fontWeight: 300, letterSpacing: 1 },
   subtitle: { color: '#94a3b8', margin: 0, fontSize: 16 },
   record: { color: '#60a5fa', marginTop: 12, fontSize: 14 },
   resumeBtn: {

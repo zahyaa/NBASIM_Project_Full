@@ -101,4 +101,18 @@ function calculateRatingFromProfile(player) {
   return Math.round(Math.min(99, Math.max(40, base)));
 }
 
-module.exports = { calculateRating, ratePlayersFromStats, calculateRatingFromProfile };
+module.exports = { calculateRating, ratePlayersFromStats, calculateRatingFromProfile, getPlayerEra };
+
+/**
+ * Determine a player's NBA era based on draft year or career years.
+ */
+function getPlayerEra(draftYear) {
+  if (!draftYear) return { era: 'Unknown', decade: null, color: '#64748b' };
+  if (draftYear < 1970) return { era: 'Pioneer', decade: '60s', color: '#a78bfa' };
+  if (draftYear < 1980) return { era: 'Classic', decade: '70s', color: '#c084fc' };
+  if (draftYear < 1990) return { era: 'Showtime', decade: '80s', color: '#f472b6' };
+  if (draftYear < 2000) return { era: 'Golden', decade: '90s', color: '#fb923c' };
+  if (draftYear < 2010) return { era: 'New School', decade: '00s', color: '#34d399' };
+  if (draftYear < 2020) return { era: 'Modern', decade: '10s', color: '#38bdf8' };
+  return { era: 'Current', decade: '20s', color: '#22c55e' };
+}

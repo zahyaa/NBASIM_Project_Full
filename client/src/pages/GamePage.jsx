@@ -124,6 +124,7 @@ export default function GamePage() {
                       : '2px solid #334155',
                   }}
                 >
+                  {team.logoEspn && <img src={team.logoEspn} alt="" style={{ width: 24, height: 24, objectFit: 'contain', verticalAlign: 'middle', marginRight: 6 }} onError={e => e.target.style.display = 'none'} />}
                   {team.full_name}
                 </button>
               ))}
@@ -166,6 +167,13 @@ export default function GamePage() {
             teamB={simResult.teamB}
             scoreA={simResult.scoreA}
             scoreB={simResult.scoreB}
+            logoA={selectedOpponent ? null : null}
+            logoB={selectedOpponent?.logoEspn || selectedOpponent?.logo || null}
+            teamStatsA={simResult.teamStatsA}
+            teamStatsB={simResult.teamStatsB}
+            shots={simResult.shots}
+            winProbability={simResult.winProbability}
+            leaders={simResult.leaders}
           />
           <div style={{ textAlign: 'center', marginTop: 20 }}>
             <button onClick={() => setSimResult(null)} style={styles.simBtn}>

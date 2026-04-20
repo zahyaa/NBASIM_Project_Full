@@ -22,6 +22,7 @@ const userSchema = new mongoose.Schema({
     name: { type: String, default: '' },
     city: { type: String, default: '' },
     coach: { type: String, default: '' },
+    logo: { type: String, default: '' }, // base64 or URL of custom logo
     players: [playerSlotSchema],
   },
 

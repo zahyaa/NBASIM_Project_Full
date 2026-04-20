@@ -69,9 +69,11 @@ export default function PlayerBioPage() {
         <div style={s.resultsGrid}>
           {results.map(p => (
             <button key={p.id} onClick={() => handleSelectPlayer(p)} style={s.playerTile}>
+              {p.teamLogo && <img src={p.teamLogo} alt="" style={{ width: 28, height: 28, objectFit: 'contain', marginBottom: 4 }} onError={e => e.target.style.display='none'} />}
               <div style={s.tileRating}>{p.rating}</div>
               <div style={s.tileName}>{p.firstName} {p.lastName}</div>
               <div style={s.tileMeta}>{p.position} | {p.team}</div>
+              {p.era && <div style={{ color: p.era.color, fontSize: 11, fontWeight: 700, marginTop: 4 }}>{p.era.era}</div>}
             </button>
           ))}
         </div>
@@ -83,7 +85,11 @@ export default function PlayerBioPage() {
             <div style={s.bioRating}>{bio.rating}</div>
             <div>
               <h2 style={s.bioName}>{bio.firstName} {bio.lastName}</h2>
-              <p style={s.bioTeam}>{bio.team} | #{bio.jerseyNumber || '—'}</p>
+              <p style={s.bioTeam}>
+                {bio.teamLogo && <img src={bio.teamLogo} alt="" style={{ width: 20, height: 20, objectFit: 'contain', verticalAlign: 'middle', marginRight: 6 }} onError={e => e.target.style.display='none'} />}
+                {bio.team} | #{bio.jerseyNumber || '—'}
+              </p>
+              {bio.era && <span style={{ display: 'inline-block', padding: '2px 10px', borderRadius: 4, fontSize: 12, fontWeight: 700, background: bio.era.color + '22', color: bio.era.color, marginTop: 4 }}>{bio.era.era} Era</span>}
             </div>
           </div>
           <div style={s.infoGrid}>

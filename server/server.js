@@ -25,6 +25,7 @@ const nbaRoutes = require('./routes/nba');
 const draftRoutes = require('./routes/draft');
 const simulateRoutes = require('./routes/simulate');
 const settingsRoutes = require('./routes/settings');
+const uploadRoutes = require('./routes/upload');
 
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -38,6 +39,7 @@ app.use('/api/nba', nbaRoutes);
 app.use('/api/draft', draftRoutes);
 app.use('/api/simulate', simulateRoutes);
 app.use('/api/settings', settingsRoutes);
+app.use('/api/upload', uploadRoutes);
 
 const PORT = process.env.PORT || 5001;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));

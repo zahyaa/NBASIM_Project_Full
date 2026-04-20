@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 
@@ -9,6 +9,8 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const fileRef = useRef(null);
 
   useEffect(() => {
     if (user?.difficulty) setDifficulty(user.difficulty);
@@ -75,6 +77,30 @@ export default function SettingsPage() {
     { key: 'legacy', label: 'Legacy', desc: 'Maximum challenge, legend mode', color: '#ef4444' },
   ];
 
+  const handleLogoUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    setError('');
+    try {
+      const formData = new FormData();
+      formData.append('logo', file);
+      const res = await fetch('/api/upload/logo', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Upload failed');
+      const meRes = await fetch('/api/auth/me', { headers: { Authorization: `Bearer ${token}` } });
+      setUser(await meRes.json());
+      setMessage('Logo uploaded!');
+    } catch (err) {
+      setError(err.message);
+    }
+    setUploading(false);
+  };
+
   return (
     <div style={s.container}>
       <button onClick={() => navigate('/menu')} style={s.backBtn}>&larr; Main Menu</button>
@@ -107,6 +133,26 @@ export default function SettingsPage() {
           Record: {user?.wins || 0}W - {user?.losses || 0}L
           {user?.team?.name ? ` | Team: ${user.team.name}` : ''}
         </p>
+      </div>
+
+      <div style={s.card}>
+        <h2 style={s.sectionTitle}>Team Logo</h2>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          {user?.team?.logo ? (
+            <img src={`/api/upload/file/${user.team.logo.split('/').pop()}`} alt="Team Logo"
+              style={{ width: 64, height: 64, objectFit: 'contain', borderRadius: 8, border: '1px solid #334155' }} />
+          ) : (
+            <div style={{ width: 64, height: 64, borderRadius: 8, background: '#0f172a', border: '1px solid #334155', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b', fontSize: 11 }}>No Logo</div>
+          )}
+          <div>
+            <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml" onChange={handleLogoUpload} style={{ display: 'none' }} />
+            <button onClick={() => fileRef.current?.click()} disabled={uploading}
+              style={{ padding: '8px 20px', borderRadius: 6, border: 'none', background: '#a855f7', color: '#fff', fontWeight: 600, cursor: 'pointer', fontSize: 13 }}>
+              {uploading ? 'Uploading...' : user?.team?.logo ? 'Change Logo' : 'Upload Logo'}
+            </button>
+            <p style={{ color: '#64748b', fontSize: 11, marginTop: 4 }}>PNG, JPG, or SVG. Max 2MB.</p>
+          </div>
+        </div>
       </div>
 
       <div style={s.card}>

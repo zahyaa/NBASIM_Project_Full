@@ -23,6 +23,22 @@ const NBA_COACHES = [
   'Quin Snyder', 'JJ Redick', 'Wes Unseld Jr.',
 ];
 
+const DREAM_TEAMS = [
+  { label: "90s All-Stars", names: ['Michael Jordan', 'Scottie Pippen', 'Hakeem Olajuwon', 'Karl Malone', 'John Stockton'] },
+  { label: "2000s Elite", names: ['Kobe Bryant', 'Tim Duncan', 'Allen Iverson', 'Kevin Garnett', 'Shaquille ONeal'] },
+  { label: "Modern Icons", names: ['LeBron James', 'Stephen Curry', 'Kevin Durant', 'Giannis Antetokounmpo', 'Nikola Jokic'] },
+  { label: "Old School Legends", names: ['Wilt Chamberlain', 'Bill Russell', 'Kareem Abdul-Jabbar', 'Oscar Robertson', 'Jerry West'] },
+];
+
+const ERA_FILTERS = [
+  { label: 'All Eras', value: null },
+  { label: '60s–70s', value: ['Pioneer', 'Classic'] },
+  { label: '80s', value: ['Showtime'] },
+  { label: '90s', value: ['Golden'] },
+  { label: '00s', value: ['New School'] },
+  { label: '10s+', value: ['Modern', 'Current'] },
+];
+
 export default function DraftPage() {
   const { token, user, setUser } = useAuth();
   const navigate = useNavigate();
@@ -34,6 +50,8 @@ export default function DraftPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [searching, setSearching] = useState(false);
+  const [eraFilter, setEraFilter] = useState(null);
+  const [loadingPreset, setLoadingPreset] = useState('');
 
   const [conference, setConference] = useState(user?.conference || '');
   const [league, setLeague] = useState(user?.league || '');
@@ -47,8 +65,31 @@ export default function DraftPage() {
 
   const pool = useMemo(() => {
     const draftedIds = new Set(roster.map(p => p.playerId));
-    return rawPool.filter(p => !draftedIds.has(p.id));
-  }, [rawPool, roster]);
+    let filtered = rawPool.filter(p => !draftedIds.has(p.id));
+    if (eraFilter) {
+      filtered = filtered.filter(p => p.era && eraFilter.includes(p.era.era));
+    }
+    return filtered;
+  }, [rawPool, roster, eraFilter]);
+
+  const loadDreamTeam = async (preset) => {
+    setLoadingPreset(preset.label);
+    setError('');
+    try {
+      const results = await Promise.all(
+        preset.names.map(name =>
+          fetch(`/api/nba/players/search?q=${encodeURIComponent(name)}`, {
+            headers: { Authorization: `Bearer ${token}` },
+          }).then(r => r.json())
+        )
+      );
+      const players = results.map(r => r.data?.[0]).filter(Boolean);
+      setSearchResults(players);
+    } catch (err) {
+      setError(err.message);
+    }
+    setLoadingPreset('');
+  };
 
   const filteredCities = cityFilter
     ? US_CITIES.filter(c => c.toLowerCase().includes(cityFilter.toLowerCase()))
@@ -157,9 +198,13 @@ export default function DraftPage() {
 
   const PlayerCard = ({ player }) => (
     <div style={s.playerCard}>
+      {player.teamLogo && <img src={player.teamLogo} alt="" style={{ width: 22, height: 22, objectFit: 'contain' }} onError={e => e.target.style.display='none'} />}
       <div style={s.playerInfo}>
         <span style={s.playerName}>{player.firstName} {player.lastName}</span>
-        <span style={s.playerMeta}>{player.position} | {player.team}</span>
+        <span style={s.playerMeta}>
+          {player.position} | {player.team}
+          {player.era && <span style={{ marginLeft: 6, color: player.era.color, fontWeight: 700, fontSize: 11 }}>{player.era.era}</span>}
+        </span>
       </div>
       <div style={s.ratingBadge}>{player.rating}</div>
       <button onClick={() => handlePick(player)} disabled={picking || roster.length >= 12} style={s.draftBtn}>Draft</button>
@@ -242,6 +287,29 @@ export default function DraftPage() {
           {searching ? '...' : 'Search'}
         </button>
       </div>
+
+      {/* Dream Team Presets */}
+      <div style={s.presetsRow}>
+        <span style={s.presetsLabel}>Dream Teams:</span>
+        {DREAM_TEAMS.map(dt => (
+          <button key={dt.label} onClick={() => loadDreamTeam(dt)}
+            disabled={!!loadingPreset}
+            style={s.presetBtn}>
+            {loadingPreset === dt.label ? '...' : dt.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Era Filters */}
+      <div style={s.eraRow}>
+        {ERA_FILTERS.map(ef => (
+          <button key={ef.label}
+            onClick={() => setEraFilter(ef.value)}
+            style={eraFilter === ef.value ? { ...s.eraBtn, ...s.eraBtnActive } : s.eraBtn}>
+            {ef.label}
+          </button>
+        ))}
+      </div>
       {searchResults.length > 0 && (
         <div style={s.searchPanel}>
           <h3 style={s.panelTitle}>Search Results ({searchResults.length})</h3>
@@ -321,4 +389,11 @@ const s = {
   ratingSmall: { background: '#f97316', color: '#fff', borderRadius: 4, padding: '2px 6px', fontWeight: 700, fontSize: 11 },
   emptyText: { color: '#64748b', textAlign: 'center', padding: 20 },
   completeBtn: { width: '100%', padding: '12px 0', borderRadius: 8, border: 'none', background: '#22c55e', color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: 15, marginTop: 12 },
+  // Dream Teams & Era Filters
+  presetsRow: { display: 'flex', gap: 8, justifyContent: 'center', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', maxWidth: 1100, margin: '0 auto 10px' },
+  presetsLabel: { color: '#94a3b8', fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 1 },
+  presetBtn: { padding: '6px 14px', borderRadius: 6, border: '1px solid #a855f7', background: 'transparent', color: '#a855f7', fontWeight: 600, cursor: 'pointer', fontSize: 12, transition: 'all 0.2s' },
+  eraRow: { display: 'flex', gap: 6, justifyContent: 'center', marginBottom: 16, maxWidth: 1100, margin: '0 auto 16px' },
+  eraBtn: { padding: '6px 14px', borderRadius: 20, border: '1px solid #334155', background: '#0f172a', color: '#94a3b8', fontWeight: 600, cursor: 'pointer', fontSize: 12 },
+  eraBtnActive: { border: '1px solid #f97316', color: '#f97316', background: 'rgba(249,115,22,0.1)' },
 };

@@ -1,6 +1,7 @@
 const express = require('express');
 const axios = require('axios');
-const { calculateRating, calculateRatingFromProfile } = require('../services/playerRating');
+const { calculateRating, calculateRatingFromProfile, getPlayerEra } = require('../services/playerRating');
+const { getTeamLogoUrl, getTeamLogoEspn, getTeamIdFromName } = require('../services/nbaImages');
 const auth = require('../middleware/auth');
 const router = express.Router();
 
@@ -16,7 +17,12 @@ function apiHeaders() {
 router.get('/teams', async (req, res) => {
   try {
     const { data } = await axios.get(`${API_BASE}/teams`, { headers: apiHeaders() });
-    res.json(data.data);
+    const teams = data.data.map(t => ({
+      ...t,
+      logo: getTeamLogoUrl(t.id),
+      logoEspn: getTeamLogoEspn(t.id),
+    }));
+    res.json(teams);
   } catch (err) {
     res.status(502).json({ error: 'Failed to fetch teams from NBA API', details: err.message });
   }
@@ -38,6 +44,7 @@ router.get('/players/search', async (req, res) => {
       position: p.position || 'N/A',
       team: p.team ? p.team.full_name : 'Free Agent',
       teamId: p.team ? p.team.id : null,
+      teamLogo: p.team ? getTeamLogoEspn(p.team.id) : null,
       rating: calculateRatingFromProfile(p),
       height: p.height,
       weight: p.weight,
@@ -46,6 +53,7 @@ router.get('/players/search', async (req, res) => {
       draftYear: p.draft_year,
       draftRound: p.draft_round,
       draftNumber: p.draft_number,
+      era: getPlayerEra(p.draft_year),
     }));
     res.json({ data: players, meta: data.meta });
   } catch (err) {
@@ -77,6 +85,8 @@ router.get('/players/:id/bio', async (req, res) => {
       lastName: player.last_name,
       position: player.position || 'N/A',
       team: player.team ? player.team.full_name : 'Free Agent',
+      teamId: player.team ? player.team.id : null,
+      teamLogo: player.team ? getTeamLogoEspn(player.team.id) : null,
       conference: player.team ? player.team.conference : '',
       height: player.height,
       weight: player.weight,
@@ -86,6 +96,7 @@ router.get('/players/:id/bio', async (req, res) => {
       draftRound: player.draft_round,
       draftNumber: player.draft_number,
       rating: seasonAvg ? calculateRating(seasonAvg) : calculateRatingFromProfile(player),
+      era: getPlayerEra(player.draft_year),
       seasonAverage: seasonAvg,
     });
   } catch (err) {
