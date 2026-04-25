@@ -19,12 +19,13 @@ const storage = multer.diskStorage({
 });
 
 const fileFilter = (req, file, cb) => {
-  const allowed = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'];
+  // SVG intentionally excluded — SVG can carry inline scripts.
+  const allowed = ['.png', '.jpg', '.jpeg', '.gif', '.webp'];
   const ext = path.extname(file.originalname).toLowerCase();
   if (allowed.includes(ext)) {
     cb(null, true);
   } else {
-    cb(new Error('Only image files (png, jpg, gif, webp, svg) are allowed'));
+    cb(new Error('Only image files (png, jpg, gif, webp) are allowed'));
   }
 };
 

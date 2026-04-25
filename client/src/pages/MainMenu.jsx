@@ -6,7 +6,7 @@ const MODES = [
   {
     key: 'fantasy',
     title: 'Fantasy Draft',
-    desc: 'Draft legends from every era. MJ, LeBron, Wilt — all on one roster. Dream Team presets included.',
+    desc: 'Draft current NBA stars and build your dream roster. Quick-pick presets included.',
     icon: '\u{1F3C6}',
     path: '/draft',
     color: '#f97316',
@@ -30,7 +30,7 @@ const MODES = [
   {
     key: 'blacktop',
     title: 'Blacktop',
-    desc: 'Streetball with any NBA player ever. 1v1 to 5v5 half-court. Mix eras freely.',
+    desc: 'Streetball with active NBA players. 1v1 to 5v5 half-court.',
     icon: '\u{1F525}',
     path: '/blacktop',
     color: '#ef4444',
@@ -38,7 +38,7 @@ const MODES = [
   {
     key: 'bio',
     title: 'Players Bio',
-    desc: 'Real NBA data. Search any player from 1946 to today. Stats, ratings, era badges.',
+    desc: 'Live NBA player data. Search any active player. Stats, ratings, team info.',
     icon: '\u{1F4CB}',
     path: '/players',
     color: '#a855f7',
@@ -69,7 +69,7 @@ export default function MainMenu() {
     <div style={styles.container}>
       <div style={styles.header}>
         <h1 style={styles.title}>NBA SIM</h1>
-        <p style={styles.tagline}>Every player. Every era. Your rules.</p>
+        <p style={styles.tagline}>Live NBA roster. Your rules.</p>
         <p style={styles.subtitle}>Welcome, {user?.username}. Choose your game mode.</p>
         {user?.draftCompleted && (
           <p style={styles.record}>

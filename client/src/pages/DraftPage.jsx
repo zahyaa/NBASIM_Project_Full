@@ -24,19 +24,10 @@ const NBA_COACHES = [
 ];
 
 const DREAM_TEAMS = [
-  { label: "90s All-Stars", names: ['Michael Jordan', 'Scottie Pippen', 'Hakeem Olajuwon', 'Karl Malone', 'John Stockton'] },
-  { label: "2000s Elite", names: ['Kobe Bryant', 'Tim Duncan', 'Allen Iverson', 'Kevin Garnett', 'Shaquille ONeal'] },
-  { label: "Modern Icons", names: ['LeBron James', 'Stephen Curry', 'Kevin Durant', 'Giannis Antetokounmpo', 'Nikola Jokic'] },
-  { label: "Old School Legends", names: ['Wilt Chamberlain', 'Bill Russell', 'Kareem Abdul-Jabbar', 'Oscar Robertson', 'Jerry West'] },
-];
-
-const ERA_FILTERS = [
-  { label: 'All Eras', value: null },
-  { label: '60s–70s', value: ['Pioneer', 'Classic'] },
-  { label: '80s', value: ['Showtime'] },
-  { label: '90s', value: ['Golden'] },
-  { label: '00s', value: ['New School'] },
-  { label: '10s+', value: ['Modern', 'Current'] },
+  { label: 'Eastern Stars', names: ['Jayson Tatum', 'Joel Embiid', 'Giannis Antetokounmpo', 'Jaylen Brown', 'Donovan Mitchell'] },
+  { label: 'Western Stars', names: ['LeBron James', 'Stephen Curry', 'Nikola Jokic', 'Luka Doncic', 'Anthony Davis'] },
+  { label: 'Young Guns', names: ['Anthony Edwards', 'Victor Wembanyama', 'Paolo Banchero', 'Chet Holmgren', 'Tyrese Haliburton'] },
+  { label: 'Modern Bigs', names: ['Joel Embiid', 'Nikola Jokic', 'Karl-Anthony Towns', 'Bam Adebayo', 'Anthony Davis'] },
 ];
 
 export default function DraftPage() {
@@ -50,7 +41,6 @@ export default function DraftPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [searching, setSearching] = useState(false);
-  const [eraFilter, setEraFilter] = useState(null);
   const [loadingPreset, setLoadingPreset] = useState('');
 
   const [conference, setConference] = useState(user?.conference || '');
@@ -65,12 +55,8 @@ export default function DraftPage() {
 
   const pool = useMemo(() => {
     const draftedIds = new Set(roster.map(p => p.playerId));
-    let filtered = rawPool.filter(p => !draftedIds.has(p.id));
-    if (eraFilter) {
-      filtered = filtered.filter(p => p.era && eraFilter.includes(p.era.era));
-    }
-    return filtered;
-  }, [rawPool, roster, eraFilter]);
+    return rawPool.filter(p => !draftedIds.has(p.id));
+  }, [rawPool, roster]);
 
   const loadDreamTeam = async (preset) => {
     setLoadingPreset(preset.label);
@@ -140,7 +126,7 @@ export default function DraftPage() {
     setLoading(true);
     try {
       const conf = user?.conference || conference;
-      const res = await fetch(`/api/draft/pool?season=${user?.season || 2024}&conference=${conf}`, {
+      const res = await fetch(`/api/draft/pool?conference=${encodeURIComponent(conf)}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) throw new Error('Failed to load draft pool');
@@ -217,7 +203,7 @@ export default function DraftPage() {
         <div style={s.setupCard}>
           <button onClick={() => navigate('/menu')} style={s.backBtn}>&larr; Main Menu</button>
           <h1 style={s.title}>Fantasy Draft</h1>
-          <p style={s.subtitle}>Create your dream team from all NBA eras</p>
+          <p style={s.subtitle}>Build your dream team from active NBA players</p>
           {error && <div style={s.error}>{error}</div>}
           <div style={s.setupForm}>
             <label style={s.label}>League</label>
@@ -280,7 +266,7 @@ export default function DraftPage() {
       </div>
       {error && <div style={s.error}>{error}</div>}
       <div style={s.searchBar}>
-        <input type="text" placeholder="Search any NBA player (active or retired)..."
+        <input type="text" placeholder="Search active NBA players..."
           value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && handleSearch()} style={s.searchInput} />
         <button onClick={handleSearch} disabled={searching} style={s.searchBtn}>
@@ -300,16 +286,7 @@ export default function DraftPage() {
         ))}
       </div>
 
-      {/* Era Filters */}
-      <div style={s.eraRow}>
-        {ERA_FILTERS.map(ef => (
-          <button key={ef.label}
-            onClick={() => setEraFilter(ef.value)}
-            style={eraFilter === ef.value ? { ...s.eraBtn, ...s.eraBtnActive } : s.eraBtn}>
-            {ef.label}
-          </button>
-        ))}
-      </div>
+      {/* Era Filters removed — paid API only indexes currently active players. */}
       {searchResults.length > 0 && (
         <div style={s.searchPanel}>
           <h3 style={s.panelTitle}>Search Results ({searchResults.length})</h3>
@@ -393,7 +370,4 @@ const s = {
   presetsRow: { display: 'flex', gap: 8, justifyContent: 'center', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', maxWidth: 1100, margin: '0 auto 10px' },
   presetsLabel: { color: '#94a3b8', fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 1 },
   presetBtn: { padding: '6px 14px', borderRadius: 6, border: '1px solid #a855f7', background: 'transparent', color: '#a855f7', fontWeight: 600, cursor: 'pointer', fontSize: 12, transition: 'all 0.2s' },
-  eraRow: { display: 'flex', gap: 6, justifyContent: 'center', marginBottom: 16, maxWidth: 1100, margin: '0 auto 16px' },
-  eraBtn: { padding: '6px 14px', borderRadius: 20, border: '1px solid #334155', background: '#0f172a', color: '#94a3b8', fontWeight: 600, cursor: 'pointer', fontSize: 12 },
-  eraBtnActive: { border: '1px solid #f97316', color: '#f97316', background: 'rgba(249,115,22,0.1)' },
 };

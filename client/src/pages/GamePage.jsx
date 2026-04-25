@@ -34,7 +34,7 @@ export default function GamePage() {
   useEffect(() => {
     if (!selectedOpponent) return;
     setFetchingRoster(true);
-    fetch(`/api/nba/roster?team_id=${selectedOpponent.id}&season=${user?.season || 2024}`, {
+    fetch(`/api/nba/roster?team_id=${selectedOpponent.id}`, {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then(res => {

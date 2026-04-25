@@ -1,7 +1,7 @@
 const express = require('express');
 const axios = require('axios');
 const { calculateRating, calculateRatingFromProfile, getPlayerEra } = require('../services/playerRating');
-const { getTeamLogoUrl, getTeamLogoEspn, getTeamIdFromName } = require('../services/nbaImages');
+const { getTeamLogoUrl, getTeamLogoEspn } = require('../services/nbaImages');
 const auth = require('../middleware/auth');
 const router = express.Router();
 
@@ -9,8 +9,35 @@ router.use(auth);
 
 const API_BASE = 'https://api.balldontlie.io/v1';
 
+// Current NBA regular season (the season *starting* in this calendar year).
+// balldontlie uses the start year, e.g. season=2025 means the 2025-26 season.
+const CURRENT_SEASON = Number(process.env.BALLDONTLIE_SEASON) ||
+  (new Date().getMonth() >= 8 ? new Date().getFullYear() : new Date().getFullYear() - 1);
+
 function apiHeaders() {
   return { Authorization: process.env.BALLDONTLIE_API_KEY };
+}
+
+// Paid-tier helper: fetch season averages for a batch of player ids,
+// chunking to respect per-request id limits, and return a {playerId: stats} map.
+async function fetchSeasonAverages(playerIds, season = CURRENT_SEASON) {
+  const map = {};
+  if (!playerIds || !playerIds.length) return map;
+  const CHUNK = 25;
+  for (let i = 0; i < playerIds.length; i += CHUNK) {
+    const chunk = playerIds.slice(i, i + CHUNK);
+    const qs = chunk.map(id => `player_ids[]=${id}`).join('&');
+    try {
+      const { data } = await axios.get(
+        `${API_BASE}/season_averages?season=${Number(season)}&${qs}`,
+        { headers: apiHeaders() }
+      );
+      for (const sa of data.data || []) map[sa.player_id] = sa;
+    } catch (err) {
+      console.warn('[nba] season_averages chunk failed:', err.response?.status || err.message);
+    }
+  }
+  return map;
 }
 
 // GET /api/nba/teams — all NBA teams
@@ -37,24 +64,31 @@ router.get('/players/search', async (req, res) => {
     if (req.query.cursor) params.cursor = Number(req.query.cursor);
     const { data } = await axios.get(`${API_BASE}/players`, { headers: apiHeaders(), params });
 
-    const players = data.data.map(p => ({
-      id: p.id,
-      firstName: p.first_name,
-      lastName: p.last_name,
-      position: p.position || 'N/A',
-      team: p.team ? p.team.full_name : 'Free Agent',
-      teamId: p.team ? p.team.id : null,
-      teamLogo: p.team ? getTeamLogoEspn(p.team.id) : null,
-      rating: calculateRatingFromProfile(p),
-      height: p.height,
-      weight: p.weight,
-      jersey: p.jersey_number,
-      country: p.country,
-      draftYear: p.draft_year,
-      draftRound: p.draft_round,
-      draftNumber: p.draft_number,
-      era: getPlayerEra(p.draft_year),
-    }));
+    // Paid tier: enrich search results with current-season averages.
+    const statsMap = await fetchSeasonAverages(data.data.map(p => p.id));
+
+    const players = data.data.map(p => {
+      const sa = statsMap[p.id] || null;
+      return {
+        id: p.id,
+        firstName: p.first_name,
+        lastName: p.last_name,
+        position: p.position || 'N/A',
+        team: p.team ? p.team.full_name : 'Free Agent',
+        teamId: p.team ? p.team.id : null,
+        teamLogo: p.team ? getTeamLogoEspn(p.team.id) : null,
+        rating: sa ? calculateRating(sa) : calculateRatingFromProfile(p),
+        stats: sa,
+        height: p.height,
+        weight: p.weight,
+        jersey: p.jersey_number,
+        country: p.country,
+        draftYear: p.draft_year,
+        draftRound: p.draft_round,
+        draftNumber: p.draft_number,
+        era: getPlayerEra(p.draft_year),
+      };
+    });
     res.json({ data: players, meta: data.meta });
   } catch (err) {
     res.status(502).json({ error: 'Failed to search players', details: err.message });
@@ -64,20 +98,23 @@ router.get('/players/search', async (req, res) => {
 // GET /api/nba/players/:id/bio — full player profile + career stats
 router.get('/players/:id/bio', async (req, res) => {
   try {
+    const season = Number(req.query.season) || CURRENT_SEASON;
     const { data: playerData } = await axios.get(`${API_BASE}/players/${req.params.id}`, {
       headers: apiHeaders(),
     });
     const player = playerData.data;
 
-    // Try to get current season stats
+    // Paid tier: pull current-season averages directly.
     let seasonAvg = null;
     try {
       const { data: statsData } = await axios.get(
-        `${API_BASE}/season_averages?season=2024&player_ids[]=${player.id}`,
+        `${API_BASE}/season_averages?season=${season}&player_ids[]=${player.id}`,
         { headers: apiHeaders() }
       );
       seasonAvg = statsData.data[0] || null;
-    } catch { /* free tier fallback */ }
+    } catch (err) {
+      console.warn('[nba] bio season_averages failed:', err.response?.status || err.message);
+    }
 
     res.json({
       id: player.id,
@@ -108,8 +145,8 @@ router.get('/players/:id/bio', async (req, res) => {
 router.get('/players', async (req, res) => {
   try {
     const { team_id, per_page = 25, cursor } = req.query;
-    const params = { per_page: Number(per_page) };
-    if (team_id) params.team_ids = [Number(team_id)];
+    const params = { per_page: Math.min(100, Number(per_page)) };
+    if (team_id) params['team_ids[]'] = Number(team_id);
     if (cursor) params.cursor = Number(cursor);
 
     const { data } = await axios.get(`${API_BASE}/players`, { headers: apiHeaders(), params });
@@ -119,12 +156,12 @@ router.get('/players', async (req, res) => {
   }
 });
 
-// GET /api/nba/players/:id/stats?season=2024 — season averages for one player
+// GET /api/nba/players/:id/stats?season=2025 — season averages for one player
 router.get('/players/:id/stats', async (req, res) => {
   try {
-    const season = req.query.season || 2024;
+    const season = Number(req.query.season) || CURRENT_SEASON;
     const { data } = await axios.get(
-      `${API_BASE}/season_averages?season=${Number(season)}&player_ids[]=${Number(req.params.id)}`,
+      `${API_BASE}/season_averages?season=${season}&player_ids[]=${Number(req.params.id)}`,
       { headers: apiHeaders() }
     );
 
@@ -132,46 +169,25 @@ router.get('/players/:id/stats', async (req, res) => {
     const rating = avg ? calculateRating(avg) : 50;
     res.json({ seasonAverage: avg || null, rating });
   } catch (err) {
-    // Free tier fallback — fetch player profile and rate from draft data
-    try {
-      const { data: playerData } = await axios.get(`${API_BASE}/players/${req.params.id}`, {
-        headers: apiHeaders(),
-      });
-      const player = playerData.data;
-      res.json({ seasonAverage: null, rating: calculateRatingFromProfile(player) });
-    } catch (innerErr) {
-      res.status(502).json({ error: 'Failed to fetch player stats', details: err.message });
-    }
+    res.status(502).json({ error: 'Failed to fetch player stats', details: err.message });
   }
 });
 
-// GET /api/nba/roster?team_id=1&season=2024 — full roster with ratings
+// GET /api/nba/roster?team_id=1&season=2025 — full roster with ratings
 router.get('/roster', async (req, res) => {
   try {
-    const { team_id, season = 2024 } = req.query;
+    const { team_id } = req.query;
+    const season = Number(req.query.season) || CURRENT_SEASON;
     if (!team_id) return res.status(400).json({ error: 'team_id is required' });
 
-    // Fetch players on team (free tier)
     const { data: playersData } = await axios.get(`${API_BASE}/players`, {
       headers: apiHeaders(),
-      params: { 'team_ids[]': Number(team_id), per_page: 25 },
+      params: { 'team_ids[]': Number(team_id), per_page: 100 },
     });
     const players = playersData.data;
 
-    // Try season averages (paid tier), fall back to profile ratings
-    let statsMap = {};
-    try {
-      const qs = players.map(p => `player_ids[]=${p.id}`).join('&');
-      const { data: statsData } = await axios.get(
-        `${API_BASE}/season_averages?season=${Number(season)}&${qs}`,
-        { headers: apiHeaders() }
-      );
-      for (const sa of statsData.data) {
-        statsMap[sa.player_id] = sa;
-      }
-    } catch {
-      // Free tier — season_averages not available
-    }
+    // Paid tier: pull season averages for the whole roster.
+    const statsMap = await fetchSeasonAverages(players.map(p => p.id), season);
 
     const roster = players.map(p => {
       const sa = statsMap[p.id] || null;
@@ -193,3 +209,5 @@ router.get('/roster', async (req, res) => {
 });
 
 module.exports = router;
+module.exports.fetchSeasonAverages = fetchSeasonAverages;
+module.exports.CURRENT_SEASON = CURRENT_SEASON;

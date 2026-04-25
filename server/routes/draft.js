@@ -3,6 +3,7 @@ const axios = require('axios');
 const User = require('../models/User');
 const auth = require('../middleware/auth');
 const { calculateRating, calculateRatingFromProfile } = require('../services/playerRating');
+const { fetchSeasonAverages, CURRENT_SEASON } = require('./nba');
 const router = express.Router();
 
 const API_BASE = 'https://api.balldontlie.io/v1';
@@ -32,10 +33,10 @@ router.post('/setup', auth, async (req, res) => {
   }
 });
 
-// GET /api/draft/pool?season=2024 — get draft-eligible players
+// GET /api/draft/pool?season=2025 — get draft-eligible players
 router.get('/pool', auth, async (req, res) => {
   try {
-    const season = req.query.season || 2024;
+    const season = Number(req.query.season) || CURRENT_SEASON;
     const conference = req.query.conference || '';
 
     // Fetch all teams to know conference membership
@@ -48,30 +49,36 @@ router.get('/pool', auth, async (req, res) => {
     }
     const teamIds = new Set(teams.map(t => t.id));
 
-    // Fetch a large set of players
-    const { data: playersData } = await axios.get(`${API_BASE}/players`, {
-      headers: apiHeaders(),
-      params: { per_page: 100 },
-    });
-    const players = playersData.data;
-
-    // Try to get season averages (works on paid tiers only)
-    let statsMap = {};
-    try {
-      const qs = players.map(p => `player_ids[]=${p.id}`).join('&');
-      const { data: statsData } = await axios.get(
-        `${API_BASE}/season_averages?season=${Number(season)}&${qs}`,
-        { headers: apiHeaders() }
-      );
-      for (const sa of statsData.data) {
-        statsMap[sa.player_id] = sa;
+    // Paid tier: paginate through active players to build a comprehensive pool.
+    const players = [];
+    let cursor;
+    const MAX_PAGES = 10; // up to ~1000 active players, plenty for a draft pool
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const params = { per_page: 100 };
+      if (cursor) params.cursor = cursor;
+      let playersData;
+      try {
+        ({ data: playersData } = await axios.get(`${API_BASE}/players/active`, {
+          headers: apiHeaders(),
+          params,
+        }));
+      } catch {
+        // Fallback to /players if /players/active is not enabled on this plan.
+        ({ data: playersData } = await axios.get(`${API_BASE}/players`, {
+          headers: apiHeaders(),
+          params,
+        }));
       }
-    } catch {
-      // Free tier — season_averages not available, use profile-based ratings
+      players.push(...(playersData.data || []));
+      cursor = playersData.meta?.next_cursor;
+      if (!cursor) break;
     }
 
+    // Paid tier: fetch season averages for the full pool (chunked).
+    const statsMap = await fetchSeasonAverages(players.map(p => p.id), season);
+
     const pool = players
-      .filter(p => p.team && teamIds.has(p.team.id)) // only players on teams in selected conference
+      .filter(p => p.team && teamIds.has(p.team.id))
       .map(p => {
         const sa = statsMap[p.id] || null;
         return {

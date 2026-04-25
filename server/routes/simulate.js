@@ -41,8 +41,9 @@ router.post('/', auth, async (req, res) => {
 
     const result = simulateGame(teamA, teamB);
 
-    // Save game
+    // Save game scoped to the user
     const game = new Game({
+      userId: req.userId,
       teamA: result.teamA,
       teamB: result.teamB,
       scoreA: result.scoreA,

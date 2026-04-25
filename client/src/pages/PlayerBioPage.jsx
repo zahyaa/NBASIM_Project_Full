@@ -55,7 +55,7 @@ export default function PlayerBioPage() {
     <div style={s.container}>
       <button onClick={() => navigate('/menu')} style={s.backBtn}>&larr; Main Menu</button>
       <h1 style={s.title}>Players Bio</h1>
-      <p style={s.subtitle}>Search and explore any NBA player's profile and stats</p>
+      <p style={s.subtitle}>Search and explore active NBA player profiles and stats</p>
       {error && <div style={s.error}>{error}</div>}
       <div style={s.searchBar}>
         <input type="text" placeholder="Search by player name..." value={query}

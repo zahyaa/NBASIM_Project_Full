@@ -65,7 +65,8 @@ function ratePlayersFromStats(seasonAverages) {
 
 /**
  * Estimate a rating from player profile data (draft info, position, height).
- * Used when season stats are unavailable (free API tier).
+ * Used as a fallback when season averages are unavailable for a player
+ * (e.g. rookies before games are played, or two-way contracts).
  */
 function calculateRatingFromProfile(player) {
   const draftRound = player.draft_round;

@@ -1,8 +1,8 @@
 /**
  * BlacktopPage.jsx — Blacktop (Half-Court Streetball) Game Mode
- * 
- * Lets users build two small teams (1v1 up to 5v5) from ANY NBA players
- * across all eras, then simulate a half-court game to a target score.
+ *
+ * Lets users build two small teams (1v1 up to 5v5) from active NBA players,
+ * then simulate a half-court game to a target score.
  * 
  * FLOW:
  *   1. User configures: team size (1v1 – 5v5) and target score (11, 15, or 21)
@@ -26,21 +26,20 @@ import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 
 // Quick-pick guard buttons shown below the search box when no search results are displayed.
-// Each guard has a name (used as the search query), an era label, and a color for styling.
-// Guards already on the team are filtered out in the UI.
+// All entries are active NBA guards. Guards already on the team are filtered out in the UI.
 const RECOMMENDED_GUARDS = [
-  { name: 'Stephen Curry', era: 'Current', color: '#3b82f6' },
-  { name: 'Magic Johnson', era: 'Showtime', color: '#f59e0b' },
-  { name: 'Allen Iverson', era: 'New School', color: '#8b5cf6' },
-  { name: 'Kyrie Irving', era: 'Current', color: '#3b82f6' },
-  { name: 'Chris Paul', era: 'Modern', color: '#06b6d4' },
-  { name: 'Isiah Thomas', era: 'Showtime', color: '#f59e0b' },
-  { name: 'John Stockton', era: 'Golden', color: '#22c55e' },
-  { name: 'Russell Westbrook', era: 'Modern', color: '#06b6d4' },
-  { name: 'Damian Lillard', era: 'Current', color: '#3b82f6' },
-  { name: 'Steve Nash', era: 'New School', color: '#8b5cf6' },
-  { name: 'Gary Payton', era: 'Golden', color: '#22c55e' },
-  { name: 'Jason Kidd', era: 'New School', color: '#8b5cf6' },
+  { name: 'Stephen Curry', team: 'Warriors', color: '#3b82f6' },
+  { name: 'Damian Lillard', team: 'Bucks', color: '#3b82f6' },
+  { name: 'Kyrie Irving', team: 'Mavs', color: '#3b82f6' },
+  { name: 'Shai Gilgeous-Alexander', team: 'Thunder', color: '#06b6d4' },
+  { name: 'Trae Young', team: 'Hawks', color: '#06b6d4' },
+  { name: 'Ja Morant', team: 'Grizzlies', color: '#06b6d4' },
+  { name: 'Tyrese Haliburton', team: 'Pacers', color: '#22c55e' },
+  { name: 'LaMelo Ball', team: 'Hornets', color: '#22c55e' },
+  { name: "De'Aaron Fox", team: 'Spurs', color: '#22c55e' },
+  { name: 'Devin Booker', team: 'Suns', color: '#8b5cf6' },
+  { name: 'Donovan Mitchell', team: 'Cavs', color: '#8b5cf6' },
+  { name: 'Jalen Brunson', team: 'Knicks', color: '#8b5cf6' },
 ];
 
 export default function BlacktopPage() {
@@ -61,9 +60,11 @@ export default function BlacktopPage() {
   const [error, setError] = useState('');                // Error message string (empty = no error)
   const [searchLoading, setSearchLoading] = useState(false); // True while any search/quickPick fetch is in-flight
 
-  // Refs to hold debounce timer IDs so we can clear them on re-render
+  // Refs to hold debounce timer IDs and in-flight request controllers,
+  // so we can cancel earlier requests when a new one starts.
   const debounceA = useRef(null);
   const debounceB = useRef(null);
+  const inflightRef = useRef(null);
 
   /**
    * searchPlayers — Fetch player search results from the backend.
@@ -79,7 +80,9 @@ export default function BlacktopPage() {
   const searchPlayers = async (query, setter) => {
     if (!query.trim()) { setter([]); return; }
     setSearchLoading(true);
+    if (inflightRef.current) inflightRef.current.abort();
     const ctrl = new AbortController();
+    inflightRef.current = ctrl;
     const timer = setTimeout(() => ctrl.abort(), 8000); // 8s timeout
     try {
       const res = await fetch(`/api/nba/players/search?q=${encodeURIComponent(query)}`, {
@@ -93,9 +96,10 @@ export default function BlacktopPage() {
     } catch (err) {
       clearTimeout(timer);
       if (err.name !== 'AbortError') setError(err.message);
-      else setError('Server not responding — make sure the backend is running.');
+    } finally {
+      if (inflightRef.current === ctrl) inflightRef.current = null;
+      setSearchLoading(false);
     }
-    setSearchLoading(false);
   };
 
   // Auto-search: fires 400ms after user stops typing (debounced), requires 2+ chars.
@@ -263,7 +267,7 @@ export default function BlacktopPage() {
                 <button key={g.name} onClick={() => quickPick(g.name, team, setTeam)}
                   style={{ padding: '6px 12px', borderRadius: 6, border: `1px solid ${g.color}40`, background: `${g.color}12`, color: g.color, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
                   {g.name}
-                  <span style={{ marginLeft: 4, opacity: 0.6, fontSize: 10 }}>{g.era}</span>
+                  <span style={{ marginLeft: 4, opacity: 0.6, fontSize: 10 }}>{g.team}</span>
                 </button>
               ))}
             </div>
@@ -299,12 +303,40 @@ export default function BlacktopPage() {
             {simResult.plays.map((play, i) => (
               <div key={i} style={s.playEntry}>
                 <span style={s.playScore}>{play.scoreA}-{play.scoreB}</span>
+                {play.team && (
+                  <span style={{ color: play.team === simResult.teamA ? '#3b82f6' : '#ef4444', fontWeight: 700, fontSize: 11, minWidth: 60 }}>
+                    {play.team}
+                  </span>
+                )}
                 <span>{play.text}</span>
               </div>
             ))}
           </div>
+
+          {/* Per-player box scores */}
+          {(simResult.boxScoreA || simResult.boxScoreB) && (
+            <div style={{ display: 'flex', gap: 16, marginTop: 16 }}>
+              {[
+                { label: simResult.teamA, box: simResult.boxScoreA, color: '#3b82f6' },
+                { label: simResult.teamB, box: simResult.boxScoreB, color: '#ef4444' },
+              ].map(({ label, box, color }) => (
+                <div key={label} style={{ flex: 1, background: '#0f172a', borderRadius: 8, padding: 12 }}>
+                  <div style={{ color, fontWeight: 700, fontSize: 13, marginBottom: 6 }}>{label}</div>
+                  {Object.values(box || {})
+                    .sort((a, b) => (b.pts || 0) - (a.pts || 0))
+                    .map(p => (
+                      <div key={p.name} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '3px 0', color: '#cbd5e1' }}>
+                        <span>{p.name}</span>
+                        <span style={{ fontWeight: 700 }}>{p.pts || 0} pts</span>
+                      </div>
+                    ))}
+                </div>
+              ))}
+            </div>
+          )}
+
           <div style={{ textAlign: 'center', marginTop: 16, display: 'flex', gap: 10, justifyContent: 'center' }}>
-            <button onClick={() => { setSimResult(null); setTimeout(handleSimulate, 100); }} style={s.playAgainBtn}>Rematch</button>
+            <button onClick={async () => { setSimResult(null); await handleSimulate(); }} style={s.playAgainBtn}>Rematch</button>
             <button onClick={() => {
               const tmpA = [...teamA]; setTeamA([...teamB]); setTeamB(tmpA); setSimResult(null);
             }} style={{ ...s.playAgainBtn, background: '#f97316' }}>Swap &amp; Play</button>

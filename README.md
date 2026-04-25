@@ -76,7 +76,7 @@ MONGODB_URI=mongodb://localhost:27017/nbasim
 PORT=5001
 ```
 
-Get a free API key at [app.balldontlie.io](https://app.balldontlie.io/).
+Get an API key at [app.balldontlie.io](https://app.balldontlie.io/). This project uses paid-tier endpoints (`/season_averages`, `/players/active`).
 
 ### 4. Start Backend
 
@@ -148,7 +148,7 @@ Visit [http://localhost:3000](http://localhost:3000)
 
 - Port 5001 is used instead of 5000 (macOS AirPlay Receiver occupies 5000)
 - `NODE_OPTIONS=--openssl-legacy-provider` is required for react-scripts 3.x on Node 17+
-- Free balldontlie API tier supports Teams, Players, and Games; Season Averages require a paid plan
+- Paid balldontlie API subscription enables Teams, Players, Active Players, Season Averages, and per-player Stats
 
 ---
 
