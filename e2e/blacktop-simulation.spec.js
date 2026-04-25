@@ -44,7 +44,7 @@ test('blacktop 1v1: build teams, simulate, see winner', async ({ page, user }) =
   await expect(page.getByRole('heading', { name: /CPU Team \(1\/1\)/ })).toBeVisible();
 
   // Wait for the Start button to become enabled (both teams full)
-  const startBtn = page.getByRole('button', { name: 'Start 1v1' });
+  const startBtn = page.getByRole('button', { name: 'Simulate 1v1' });
   await expect(startBtn).toBeEnabled({ timeout: 5_000 });
   await startBtn.click();
 
@@ -53,5 +53,5 @@ test('blacktop 1v1: build teams, simulate, see winner', async ({ page, user }) =
   await expect(page.getByText(/wins!$/)).toBeVisible();
 
   // Rematch button is present
-  await expect(page.getByRole('button', { name: 'Rematch' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Rematch', exact: true })).toBeVisible();
 });

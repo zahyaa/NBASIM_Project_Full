@@ -60,6 +60,12 @@ export default function BlacktopPage() {
   const [error, setError] = useState('');                // Error message string (empty = no error)
   const [searchLoading, setSearchLoading] = useState(false); // True while any search/quickPick fetch is in-flight
 
+  // Watch mode (animated play-by-play). visiblePlays is the slice of
+  // simResult.plays that has been revealed so far.
+  const [watching, setWatching] = useState(false);
+  const [visiblePlays, setVisiblePlays] = useState([]);
+  const watchTimer = useRef(null);
+
   // Refs to hold debounce timer IDs and in-flight request controllers,
   // so we can cancel earlier requests when a new one starts.
   const debounceA = useRef(null);
@@ -150,8 +156,8 @@ export default function BlacktopPage() {
    * 
    * 15-second AbortController timeout to prevent indefinite hanging.
    */
-  const handleSimulate = async () => {
-    if (teamA.length !== teamSize || teamB.length !== teamSize) return; // Both teams must be full
+  const runSimulation = async () => {
+    if (teamA.length !== teamSize || teamB.length !== teamSize) return null;
     setLoading(true);
     setError('');
     const ctrl = new AbortController();
@@ -161,8 +167,8 @@ export default function BlacktopPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
-          teamA: { name: 'Team A', players: teamA },  // Wrap in { name, players } object
-          teamB: { name: 'Team B', players: teamB },  // Wrap in { name, players } object
+          teamA: { name: 'Team A', players: teamA },
+          teamB: { name: 'Team B', players: teamB },
           targetScore,
         }),
         signal: ctrl.signal,
@@ -170,13 +176,53 @@ export default function BlacktopPage() {
       clearTimeout(timer);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      setSimResult(data); // Triggers re-render to show results screen
+      return data;
     } catch (err) {
       clearTimeout(timer);
       if (err.name !== 'AbortError') setError(err.message);
       else setError('Simulation timed out — make sure the backend is running.');
+      return null;
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
+  };
+
+  // Instant simulate: show full result immediately.
+  const handleSimulate = async () => {
+    const result = await runSimulation();
+    if (result) {
+      setSimResult(result);
+      setVisiblePlays(result.plays);
+      setWatching(false);
+    }
+  };
+
+  // Watch mode: reveal plays progressively on a timer.
+  const handleWatch = async () => {
+    const result = await runSimulation();
+    if (!result) return;
+    setSimResult(result);
+    setVisiblePlays([]);
+    setWatching(true);
+  };
+
+  // Drive the watch timer: every 600ms, append the next play.
+  useEffect(() => {
+    if (!watching || !simResult) return;
+    if (visiblePlays.length >= simResult.plays.length) {
+      setWatching(false);
+      return;
+    }
+    watchTimer.current = setTimeout(() => {
+      setVisiblePlays(prev => simResult.plays.slice(0, prev.length + 1));
+    }, 600);
+    return () => clearTimeout(watchTimer.current);
+  }, [watching, visiblePlays, simResult]);
+
+  const skipWatch = () => {
+    if (watchTimer.current) clearTimeout(watchTimer.current);
+    setVisiblePlays(simResult?.plays || []);
+    setWatching(false);
   };
 
   /**
@@ -282,25 +328,37 @@ export default function BlacktopPage() {
   // If simulation has been run, show results instead of the team-building UI.
   // Displays: scoreboard, play-by-play log, and Rematch/Swap/New Game buttons.
   if (simResult) {
+    const totalPlays = simResult.plays.length;
+    const shown = visiblePlays.length;
+    const isFinal = !watching && shown >= totalPlays;
+    // Live score: derive from last visible play so the scoreboard ticks up in watch mode.
+    const lastPlay = visiblePlays[visiblePlays.length - 1];
+    const liveA = lastPlay ? lastPlay.scoreA : 0;
+    const liveB = lastPlay ? lastPlay.scoreB : 0;
     return (
       <div style={s.container}>
         <button onClick={() => navigate('/menu')} style={s.backBtn}>&larr; Main Menu</button>
         <div style={s.resultCard}>
-          <h1 style={s.resultTitle}>Blacktop {teamSize}v{teamSize}</h1>
+          <h1 style={s.resultTitle}>{isFinal ? `Blacktop ${teamSize}v${teamSize} Final` : `Live: Blacktop ${teamSize}v${teamSize}`}</h1>
           <div style={s.scoreboard}>
             <div style={s.scoreTeam}>
               <div style={s.scoreLabel}>Your Team</div>
-              <div style={s.scoreNum}>{simResult.scoreA}</div>
+              <div style={s.scoreNum}>{isFinal ? simResult.scoreA : liveA}</div>
             </div>
             <div style={s.vsText}>VS</div>
             <div style={s.scoreTeam}>
               <div style={s.scoreLabel}>CPU Team</div>
-              <div style={s.scoreNum}>{simResult.scoreB}</div>
+              <div style={s.scoreNum}>{isFinal ? simResult.scoreB : liveB}</div>
             </div>
           </div>
-          <p style={s.winnerText}>{simResult.winner} wins!</p>
+          {isFinal && <p style={s.winnerText}>{simResult.winner} wins!</p>}
+          {watching && (
+            <p style={{ ...s.winnerText, color: '#f97316' }}>
+              Playing... {shown} / {totalPlays}
+            </p>
+          )}
           <div style={s.playLog}>
-            {simResult.plays.map((play, i) => (
+            {visiblePlays.map((play, i) => (
               <div key={i} style={s.playEntry}>
                 <span style={s.playScore}>{play.scoreA}-{play.scoreB}</span>
                 {play.team && (
@@ -313,8 +371,8 @@ export default function BlacktopPage() {
             ))}
           </div>
 
-          {/* Per-player box scores */}
-          {(simResult.boxScoreA || simResult.boxScoreB) && (
+          {/* Per-player box scores (only after final) */}
+          {isFinal && (simResult.boxScoreA || simResult.boxScoreB) && (
             <div style={{ display: 'flex', gap: 16, marginTop: 16 }}>
               {[
                 { label: simResult.teamA, box: simResult.boxScoreA, color: '#3b82f6' },
@@ -335,12 +393,19 @@ export default function BlacktopPage() {
             </div>
           )}
 
-          <div style={{ textAlign: 'center', marginTop: 16, display: 'flex', gap: 10, justifyContent: 'center' }}>
-            <button onClick={async () => { setSimResult(null); await handleSimulate(); }} style={s.playAgainBtn}>Rematch</button>
-            <button onClick={() => {
-              const tmpA = [...teamA]; setTeamA([...teamB]); setTeamB(tmpA); setSimResult(null);
-            }} style={{ ...s.playAgainBtn, background: '#f97316' }}>Swap &amp; Play</button>
-            <button onClick={() => { setSimResult(null); setTeamA([]); setTeamB([]); }} style={{ ...s.playAgainBtn, background: '#334155' }}>New Game</button>
+          <div style={{ textAlign: 'center', marginTop: 16, display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
+            {watching ? (
+              <button onClick={skipWatch} style={{ ...s.playAgainBtn, background: '#64748b' }}>Skip to Final</button>
+            ) : (
+              <>
+                <button onClick={async () => { setSimResult(null); setVisiblePlays([]); await handleSimulate(); }} style={s.playAgainBtn}>Rematch</button>
+                <button onClick={async () => { setSimResult(null); setVisiblePlays([]); await handleWatch(); }} style={{ ...s.playAgainBtn, background: '#22c55e' }}>Rematch (Watch)</button>
+                <button onClick={() => {
+                  const tmpA = [...teamA]; setTeamA([...teamB]); setTeamB(tmpA); setSimResult(null); setVisiblePlays([]);
+                }} style={{ ...s.playAgainBtn, background: '#f97316' }}>Swap &amp; Play</button>
+                <button onClick={() => { setSimResult(null); setVisiblePlays([]); setTeamA([]); setTeamB([]); }} style={{ ...s.playAgainBtn, background: '#334155' }}>New Game</button>
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -384,11 +449,18 @@ export default function BlacktopPage() {
         <TeamPicker label="CPU Team" search={searchB} setSearch={setSearchB}
           results={resultsB} setResults={setResultsB} team={teamB} setTeam={setTeamB} color="#ef4444" />
       </div>
-      <div style={{ textAlign: 'center', marginTop: 24 }}>
+      <div style={{ textAlign: 'center', marginTop: 24, display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
         <button onClick={handleSimulate}
           disabled={teamA.length !== teamSize || teamB.length !== teamSize || loading}
           style={teamA.length !== teamSize || teamB.length !== teamSize ? { ...s.simBtn, opacity: 0.5 } : s.simBtn}>
-          {loading ? 'Simulating...' : `Start ${teamSize}v${teamSize}`}
+          {loading ? 'Simulating...' : `Simulate ${teamSize}v${teamSize}`}
+        </button>
+        <button onClick={handleWatch}
+          disabled={teamA.length !== teamSize || teamB.length !== teamSize || loading}
+          style={teamA.length !== teamSize || teamB.length !== teamSize
+            ? { ...s.simBtn, background: '#22c55e', opacity: 0.5 }
+            : { ...s.simBtn, background: '#22c55e' }}>
+          Watch Play-by-Play
         </button>
       </div>
     </div>

@@ -1,106 +1,87 @@
 /**
  * OneOnOnePage.jsx — 1v1 Pickup Game Mode
  *
- * Lets users pick any two active NBA players and simulate a 1v1
- * first-to-21 street ball game. Players are fetched from the balldontlie API
- * via our backend (/api/nba/players/search).
+ * Flow:
+ *   1. User types a full player name and presses Enter / clicks Search.
+ *   2. User picks one of the search results → that becomes "Your Player".
+ *   3. CPU auto-picks an opponent from a small curated pool, trying to match
+ *      the position of the user's pick (G vs G, F vs F, C vs C).
+ *   4. User clicks either:
+ *        - "Simulate Game"  → instant final result with scoreboard + log.
+ *        - "Watch Play-by-Play" → plays reveal one at a time on a timer.
+ *   5. On Game Over: Rematch / Rematch (Watch) / New Matchup.
  *
- * FLOW:
- *   1. User picks Player A (left panel) and Player B (right panel)
- *      - Type to search (auto-searches after 400ms debounce, min 2 chars)
- *      - Or click a recommended-guard quick-pick button
- *      - Or click a popular matchup preset
- *   2. Click "Start Game" → POST /api/simulate/1v1
- *   3. Server returns { playerA, playerB, scoreA, scoreB, plays[], winner }
- *   4. Results screen shows scoreboard + play-by-play log
- *   5. User can Rematch, Swap & Play, or New Matchup
- *
- * KEY DATA SHAPE from search API (/api/nba/players/search?q=...):
- *   { id, firstName, lastName, position, team, teamId, teamLogo, rating,
- *     height, weight, jersey, country, draftYear }
- *
- * SENT TO simulate API (POST /api/simulate/1v1):
- *   { playerA: <full player object>, playerB: <full player object>, targetScore: 21 }
- *   Server sanitizes to: { playerId, firstName, lastName, position, rating }
- *   Server uses playerId = p.playerId || p.id (so sending "id" from search works)
+ * API:
+ *   GET  /api/nba/players/search?q=<full name>
+ *   POST /api/simulate/1v1   { playerA, playerB, targetScore: 21 }
  */
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 
-// Pre-built matchup buttons shown when no players are selected yet.
-// Each entry has player names (a, b) used as search queries, and a display label.
-// All players must be currently active (paid balldontlie API only indexes active rosters).
-const POPULAR_MATCHUPS = [
-  { a: 'LeBron James', b: 'Stephen Curry', label: 'LeBron vs Curry' },
-  { a: 'Jayson Tatum', b: 'Giannis Antetokounmpo', label: 'Tatum vs Giannis' },
-  { a: 'Luka Doncic', b: 'Shai Gilgeous-Alexander', label: 'Luka vs SGA' },
-  { a: 'Joel Embiid', b: 'Nikola Jokic', label: 'Embiid vs Jokic' },
-  { a: 'Kevin Durant', b: 'LeBron James', label: 'KD vs LeBron' },
-  { a: 'Anthony Edwards', b: 'Devin Booker', label: 'Ant vs Booker' },
-];
+// CPU candidate pool, grouped by primary position. The CPU picks one of these
+// at random matching the user's position. All entries must be currently active
+// (paid balldontlie API only indexes active rosters).
+const CPU_POOL = {
+  G: [
+    'Stephen Curry', 'Damian Lillard', 'Kyrie Irving',
+    'Shai Gilgeous-Alexander', 'Trae Young', 'Devin Booker',
+    'Donovan Mitchell', 'Jalen Brunson', 'Tyrese Haliburton',
+    'Ja Morant', 'LaMelo Ball',
+  ],
+  F: [
+    'LeBron James', 'Jayson Tatum', 'Giannis Antetokounmpo',
+    'Kevin Durant', 'Jaylen Brown', 'Jimmy Butler',
+    'Paolo Banchero', 'Anthony Edwards', 'Pascal Siakam',
+  ],
+  C: [
+    'Nikola Jokic', 'Joel Embiid', 'Anthony Davis',
+    'Bam Adebayo', 'Karl-Anthony Towns', 'Victor Wembanyama',
+    'Chet Holmgren',
+  ],
+};
 
-// Quick-pick guard buttons shown below the search box when no search results are displayed.
-// All entries are active NBA guards.
-const RECOMMENDED_GUARDS = [
-  { name: 'Stephen Curry', team: 'Warriors', color: '#3b82f6' },
-  { name: 'Damian Lillard', team: 'Bucks', color: '#3b82f6' },
-  { name: 'Kyrie Irving', team: 'Mavs', color: '#3b82f6' },
-  { name: 'Shai Gilgeous-Alexander', team: 'Thunder', color: '#06b6d4' },
-  { name: 'Trae Young', team: 'Hawks', color: '#06b6d4' },
-  { name: 'Ja Morant', team: 'Grizzlies', color: '#06b6d4' },
-  { name: 'Tyrese Haliburton', team: 'Pacers', color: '#22c55e' },
-  { name: 'LaMelo Ball', team: 'Hornets', color: '#22c55e' },
-  { name: "De'Aaron Fox", team: 'Spurs', color: '#22c55e' },
-  { name: 'Devin Booker', team: 'Suns', color: '#8b5cf6' },
-  { name: 'Donovan Mitchell', team: 'Cavs', color: '#8b5cf6' },
-  { name: 'Jalen Brunson', team: 'Knicks', color: '#8b5cf6' },
-];
+// Reduce a balldontlie position string like "G", "F-C", "G-F" to a top-level group.
+function positionGroup(pos) {
+  const first = String(pos || '').trim().charAt(0).toUpperCase();
+  if (first === 'G' || first === 'F' || first === 'C') return first;
+  return 'F'; // sensible fallback
+}
 
 export default function OneOnOnePage() {
-  const { token } = useAuth();       // JWT token for authenticated API calls
-  const navigate = useNavigate();     // React Router navigation
+  const { token } = useAuth();
+  const navigate = useNavigate();
 
   // --- STATE ---
-  const [searchA, setSearchA] = useState('');      // Search text for Player A input
-  const [searchB, setSearchB] = useState('');      // Search text for Player B input
-  const [resultsA, setResultsA] = useState([]);    // Search results array for Player A
-  const [resultsB, setResultsB] = useState([]);    // Search results array for Player B
-  const [playerA, setPlayerA] = useState(null);    // Selected player A object (null = not chosen)
-  const [playerB, setPlayerB] = useState(null);    // Selected player B object (null = not chosen)
-  const [simResult, setSimResult] = useState(null); // Simulation result from server (null = not simulated yet)
-  const [loading, setLoading] = useState(false);    // True while simulation POST is in-flight
-  const [error, setError] = useState('');            // Error message string (empty = no error)
-  const [loadingMatchup, setLoadingMatchup] = useState(''); // Which popular matchup button is loading
-  const [searchLoading, setSearchLoading] = useState(false); // True while any search/quickPick fetch is in-flight
+  const [searchA, setSearchA] = useState('');
+  const [resultsA, setResultsA] = useState([]);
+  const [playerA, setPlayerA] = useState(null);
+  const [playerB, setPlayerB] = useState(null);
+  const [cpuPicking, setCpuPicking] = useState(false);
+  const [simResult, setSimResult] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [searchLoading, setSearchLoading] = useState(false);
 
-  // Refs to hold debounce timer IDs and in-flight request controllers,
-  // so we can cancel earlier requests when a new one starts (prevents
-  // race conditions where a stale response overwrites newer state).
-  const debounceA = useRef(null);
-  const debounceB = useRef(null);
+  // Watch mode (animated play-by-play). visiblePlays is the slice of
+  // simResult.plays that has been revealed so far.
+  const [watching, setWatching] = useState(false);
+  const [visiblePlays, setVisiblePlays] = useState([]);
+  const watchTimer = useRef(null);
+
+  // Refs for in-flight request cancellation.
   const inflightRef = useRef(null);
 
   /**
-   * searchPlayers — Fetch player search results from the backend.
-   * @param {string} query  - The search text (e.g. "LeBron")
-   * @param {Function} setter - State setter to store results (setResultsA or setResultsB)
-   * 
-   * Uses AbortController with an 8-second timeout to prevent the page from
-   * hanging if the backend is down or slow. Shows "Searching..." in the UI
-   * while searchLoading is true.
-   * 
-   * API: GET /api/nba/players/search?q=LeBron
-   * Response: { data: [{ id, firstName, lastName, position, team, rating, era, ... }] }
+   * searchPlayers — Look up players by name (used for Player A only).
    */
-  const searchPlayers = async (query, setter) => {
-    if (!query.trim()) { setter([]); return; }
+  const searchPlayers = async (query) => {
+    if (!query.trim()) { setResultsA([]); return; }
     setSearchLoading(true);
-    // Abort any previous in-flight search so its response can't race ours.
     if (inflightRef.current) inflightRef.current.abort();
     const ctrl = new AbortController();
     inflightRef.current = ctrl;
-    const timer = setTimeout(() => ctrl.abort(), 8000); // 8s timeout
+    const timer = setTimeout(() => ctrl.abort(), 8000);
     try {
       const res = await fetch(`/api/nba/players/search?q=${encodeURIComponent(query)}`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -109,7 +90,9 @@ export default function OneOnOnePage() {
       clearTimeout(timer);
       if (!res.ok) throw new Error('Search failed');
       const data = await res.json();
-      setter(data.data);
+      setResultsA(data.data || []);
+      if (!data.data?.length) setError('No active players found for that name.');
+      else setError('');
     } catch (err) {
       clearTimeout(timer);
       if (err.name !== 'AbortError') setError(err.message);
@@ -119,72 +102,64 @@ export default function OneOnOnePage() {
     }
   };
 
-  // Auto-search: fires 400ms after user stops typing (debounced), requires 2+ chars.
-  // Clears results if text is too short. Cleanup function cancels pending timer.
-  useEffect(() => {
-    clearTimeout(debounceA.current);
-    if (searchA.trim().length >= 2) {
-      debounceA.current = setTimeout(() => searchPlayers(searchA, setResultsA), 400);
-    } else { setResultsA([]); }
-    return () => clearTimeout(debounceA.current);
-  }, [searchA]);
-
-  useEffect(() => {
-    clearTimeout(debounceB.current);
-    if (searchB.trim().length >= 2) {
-      debounceB.current = setTimeout(() => searchPlayers(searchB, setResultsB), 400);
-    } else { setResultsB([]); }
-    return () => clearTimeout(debounceB.current);
-  }, [searchB]);
-
   /**
-   * loadMatchup — Load a preset matchup by searching both player names in parallel.
-   * Used by the "Popular Matchups" buttons and "Random Matchup" button.
-   * Sets both playerA and playerB from the first search result of each query.
+   * pickCpuOpponent — Pick a CPU player from the pool, matching the user's
+   * primary position group when possible. Tries up to 5 random names from
+   * the matching group; falls back to any group if all fail.
    */
-  const loadMatchup = async (nameA, nameB, label) => {
-    setLoadingMatchup(label); // shows '...' on the button being loaded
+  const pickCpuOpponent = async (userPlayer) => {
+    setCpuPicking(true);
     setError('');
-    try {
-      const [resA, resB] = await Promise.all([
-        fetch(`/api/nba/players/search?q=${encodeURIComponent(nameA)}`, { headers: { Authorization: `Bearer ${token}` } }),
-        fetch(`/api/nba/players/search?q=${encodeURIComponent(nameB)}`, { headers: { Authorization: `Bearer ${token}` } }),
-      ]);
-      const [dataA, dataB] = await Promise.all([resA.json(), resB.json()]);
-      if (dataA.data?.[0]) setPlayerA(dataA.data[0]); // Pick first result
-      if (dataB.data?.[0]) setPlayerB(dataB.data[0]);
-    } catch (err) {
-      setError(err.message);
+    const group = positionGroup(userPlayer.position);
+    const userFullName = `${userPlayer.firstName} ${userPlayer.lastName}`.toLowerCase();
+    const tryNames = [...CPU_POOL[group]]
+      .filter(n => n.toLowerCase() !== userFullName)
+      .sort(() => Math.random() - 0.5)
+      .slice(0, 5);
+
+    // Fallback pool if the position group has no resolvable matches.
+    const fallback = Object.values(CPU_POOL).flat()
+      .filter(n => n.toLowerCase() !== userFullName)
+      .sort(() => Math.random() - 0.5)
+      .slice(0, 5);
+
+    for (const name of [...tryNames, ...fallback]) {
+      try {
+        const res = await fetch(`/api/nba/players/search?q=${encodeURIComponent(name)}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const data = await res.json();
+        const candidate = (data.data || []).find(p => p.id !== userPlayer.id);
+        if (candidate) {
+          setPlayerB(candidate);
+          setCpuPicking(false);
+          return;
+        }
+      } catch {
+        // try next name
+      }
     }
-    setLoadingMatchup('');
+    setError('CPU could not find an opponent. Please try a different player.');
+    setCpuPicking(false);
   };
 
-  // Picks a random entry from POPULAR_MATCHUPS and loads it
-  const loadRandomMatchup = async () => {
-    const random = POPULAR_MATCHUPS[Math.floor(Math.random() * POPULAR_MATCHUPS.length)];
-    await loadMatchup(random.a, random.b, 'Random');
-  };
+  // When the user picks a player, immediately auto-pick the CPU opponent.
+  useEffect(() => {
+    if (playerA && !playerB) {
+      pickCpuOpponent(playerA);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playerA]);
 
   /**
-   * handleSimulate — Send both selected players to the server for 1v1 simulation.
-   * 
-   * POST /api/simulate/1v1
-   * Body: { playerA: {full player obj}, playerB: {full player obj}, targetScore: 21 }
-   * 
-   * The server sanitizes each player to { playerId, firstName, lastName, position, rating }.
-   * It uses `p.playerId || p.id` so the "id" field from search API works as playerId.
-   * 
-   * Response: { playerA, playerB, scoreA, scoreB, plays[], winner, targetScore }
-   * plays[] = array of { text: "description", scoreA: number, scoreB: number }
-   * 
-   * 15-second AbortController timeout to prevent indefinite hanging.
+   * runSimulation — POST to /api/simulate/1v1 and return the result.
    */
-  const handleSimulate = async () => {
-    if (!playerA || !playerB) return;
+  const runSimulation = async () => {
+    if (!playerA || !playerB) return null;
     setLoading(true);
     setError('');
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 15000); // 15s timeout
+    const timer = setTimeout(() => ctrl.abort(), 15000);
     try {
       const res = await fetch('/api/simulate/1v1', {
         method: 'POST',
@@ -194,152 +169,123 @@ export default function OneOnOnePage() {
       });
       clearTimeout(timer);
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      setSimResult(data); // Triggers re-render to show results screen
+      if (!res.ok) throw new Error(data.error || 'Simulation failed');
+      return data;
     } catch (err) {
       clearTimeout(timer);
       if (err.name !== 'AbortError') setError(err.message);
       else setError('Simulation timed out — make sure the backend is running.');
+      return null;
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
-  // Rematch: clear results, keep same players, re-run simulation directly.
-  const handleRematch = async () => {
+  // Instant simulate: show full result immediately.
+  const handleSimulate = async () => {
+    const result = await runSimulation();
+    if (result) {
+      setSimResult(result);
+      setVisiblePlays(result.plays); // show all immediately
+      setWatching(false);
+    }
+  };
+
+  // Watch mode: reveal plays one at a time with a small delay.
+  const handleWatch = async () => {
+    const result = await runSimulation();
+    if (!result) return;
+    setSimResult(result);
+    setVisiblePlays([]);
+    setWatching(true);
+  };
+
+  // Drive the watch timer: every 700ms, append the next play.
+  useEffect(() => {
+    if (!watching || !simResult) return;
+    if (visiblePlays.length >= simResult.plays.length) {
+      setWatching(false);
+      return;
+    }
+    watchTimer.current = setTimeout(() => {
+      setVisiblePlays(prev => simResult.plays.slice(0, prev.length + 1));
+    }, 700);
+    return () => clearTimeout(watchTimer.current);
+  }, [watching, visiblePlays, simResult]);
+
+  const skipWatch = () => {
+    if (watchTimer.current) clearTimeout(watchTimer.current);
+    setVisiblePlays(simResult?.plays || []);
+    setWatching(false);
+  };
+
+  // Rematch with same players. Mode controls whether to animate or jump to final.
+  const handleRematch = async (mode) => {
     setSimResult(null);
-    await handleSimulate();
+    setVisiblePlays([]);
+    if (mode === 'watch') await handleWatch();
+    else await handleSimulate();
   };
 
-  // Small UI component: displays a colored era badge (e.g. "Showtime", "Current")
-  const EraBadge = ({ era }) => era ? (
-    <span style={{ ...s.eraBadge, background: era.color + '22', color: era.color }}>{era.era}</span>
-  ) : null;
-
-  /**
-   * quickPick — One-click player selection from the "Recommended Guards" buttons.
-   * Searches for the guard by name and auto-selects the first result.
-   * @param {string} name       - Guard name to search (e.g. "Stephen Curry")
-   * @param {Function} setSelected - State setter (setPlayerA or setPlayerB)
-   */
-  const quickPick = async (name, setSelected) => {
-    setSearchLoading(true);
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 8000); // 8s timeout
-    try {
-      const res = await fetch(`/api/nba/players/search?q=${encodeURIComponent(name)}`, {
-        headers: { Authorization: `Bearer ${token}` },
-        signal: ctrl.signal,
-      });
-      clearTimeout(timer);
-      const data = await res.json();
-      if (data.data?.[0]) setSelected(data.data[0]); // Auto-select first match
-    } catch (err) {
-      clearTimeout(timer);
-      if (err.name !== 'AbortError') setError(err.message);
-      else setError('Server not responding — make sure the backend is running.');
-    }
-    setSearchLoading(false);
+  const newMatchup = () => {
+    setSimResult(null);
+    setVisiblePlays([]);
+    setPlayerA(null);
+    setPlayerB(null);
+    setSearchA('');
+    setResultsA([]);
+    setError('');
   };
 
-  /**
-   * PlayerPicker — Inline component for selecting one player.
-   * Three states:
-   *   1. Player already selected → shows card with rating, name, position, "Change" button
-   *   2. No player, search results exist → shows clickable results list
-   *   3. No player, no results → shows "Recommended Guards" quick-pick buttons
-   * Also shows "Searching..." when searchLoading is true.
-   */
-  const PlayerPicker = ({ label, search, setSearch, results, setResults, selected, setSelected, color }) => (
-    <div style={s.pickerPanel}>
-      <h3 style={{ ...s.pickerTitle, color }}>{label}</h3>
-      {selected ? (
-        <div style={s.selectedCard}>
-          <div style={{ ...s.selectedRating, background: color }}>{selected.rating}</div>
-          <div>
-            <div style={s.selectedName}>{selected.firstName} {selected.lastName}</div>
-            <div style={s.selectedMeta}>
-              {selected.teamLogo && <img src={selected.teamLogo} alt="" style={{ width: 16, height: 16, objectFit: 'contain', verticalAlign: 'middle', marginRight: 4 }} onError={e => e.target.style.display='none'} />}
-              {selected.position} | {selected.team}
-            </div>
-            <EraBadge era={selected.era} />
-          </div>
-          <button onClick={() => { setSelected(null); setResults([]); }} style={s.changeBtn}>Change</button>
-        </div>
-      ) : (
-        <>
-          <div style={s.searchRow}>
-            <input type="text" placeholder="Search player..." value={search}
-              onChange={e => setSearch(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && searchPlayers(search, setResults)} style={s.input} />
-            <button onClick={() => searchPlayers(search, setResults)} disabled={searchLoading} style={{ ...s.searchBtn, background: color }}>{searchLoading ? '...' : 'Search'}</button>
-          </div>
-          {searchLoading ? (
-            <p style={{ color: '#94a3b8', fontSize: 13, textAlign: 'center', padding: 16 }}>Searching...</p>
-          ) : results.length > 0 ? (
-          <div style={s.resultsList}>
-            {results.map(p => (
-              <button key={p.id} onClick={() => setSelected(p)} style={s.resultItem}>
-                <span style={s.resultName}>{p.firstName} {p.lastName}</span>
-                {p.era && <span style={{ ...s.eraBadgeSmall, color: p.era.color }}>{p.era.decade}</span>}
-                <span style={s.resultMeta}>{p.position}</span>
-                <span style={{ ...s.resultRating, background: color }}>{p.rating}</span>
-              </button>
-            ))}
-          </div>
-          ) : (
-          <div>
-            <p style={{ color: '#64748b', fontSize: 12, margin: '10px 0 6px', fontWeight: 600 }}>Recommended Guards</p>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-              {RECOMMENDED_GUARDS.map(g => (
-                <button key={g.name} onClick={() => quickPick(g.name, setSelected)}
-                  style={{ padding: '6px 12px', borderRadius: 6, border: `1px solid ${g.color}40`, background: `${g.color}12`, color: g.color, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
-                  {g.name}
-                  <span style={{ marginLeft: 4, opacity: 0.6, fontSize: 10 }}>{g.team}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-          )}
-        </>
-      )}
-    </div>
-  );
-
-  // ===================== RESULTS SCREEN =====================
-  // If simulation has been run, show the results instead of the picker UI.
-  // Displays: scoreboard, play-by-play log, and Rematch/Swap/New Matchup buttons.
+  // ===================== RESULTS / WATCH SCREEN =====================
   if (simResult) {
+    const totalPlays = simResult.plays.length;
+    const shown = visiblePlays.length;
+    const isFinal = !watching && shown >= totalPlays;
+    // Live score: derive from last visible play (so the scoreboard ticks up in watch mode).
+    const lastPlay = visiblePlays[visiblePlays.length - 1];
+    const liveA = lastPlay ? lastPlay.scoreA : 0;
+    const liveB = lastPlay ? lastPlay.scoreB : 0;
     return (
       <div style={s.container}>
         <button onClick={() => navigate('/menu')} style={s.backBtn}>&larr; Main Menu</button>
         <div style={s.resultCard}>
-          <h1 style={s.resultTitle}>1v1 Final</h1>
+          <h1 style={s.resultTitle}>{isFinal ? '1v1 Final' : 'Live: 1v1'}</h1>
           <div style={s.scoreboard}>
             <div style={s.scoreTeam}>
               <div style={s.scoreLabel}>{simResult.playerA}</div>
-              <div style={s.scoreNum}>{simResult.scoreA}</div>
+              <div style={s.scoreNum}>{isFinal ? simResult.scoreA : liveA}</div>
             </div>
             <div style={s.vs}>VS</div>
             <div style={s.scoreTeam}>
               <div style={s.scoreLabel}>{simResult.playerB}</div>
-              <div style={s.scoreNum}>{simResult.scoreB}</div>
+              <div style={s.scoreNum}>{isFinal ? simResult.scoreB : liveB}</div>
             </div>
           </div>
-          <p style={s.winnerText}>{simResult.winner} wins!</p>
+          {isFinal && <p style={s.winnerText}>{simResult.winner} wins!</p>}
+          {watching && (
+            <p style={{ ...s.winnerText, color: '#f97316' }}>
+              Playing... {shown} / {totalPlays}
+            </p>
+          )}
           <div style={s.playLog}>
-            {simResult.plays.map((play, i) => (
+            {visiblePlays.map((play, i) => (
               <div key={i} style={s.playEntry}>
                 <span style={s.playScore}>{play.scoreA}-{play.scoreB}</span>
                 <span>{play.text}</span>
               </div>
             ))}
           </div>
-          <div style={{ textAlign: 'center', marginTop: 16, display: 'flex', gap: 10, justifyContent: 'center' }}>
-            <button onClick={handleRematch} style={s.playAgainBtn}>Rematch</button>
-            <button onClick={() => {
-              const tmpA = playerA; setPlayerA(playerB); setPlayerB(tmpA); setSimResult(null);
-            }} style={{ ...s.playAgainBtn, background: '#f97316' }}>Swap &amp; Play</button>
-            <button onClick={() => { setSimResult(null); setPlayerA(null); setPlayerB(null); }} style={{ ...s.playAgainBtn, background: '#334155' }}>New Matchup</button>
+          <div style={{ textAlign: 'center', marginTop: 16, display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
+            {watching ? (
+              <button onClick={skipWatch} style={{ ...s.playAgainBtn, background: '#64748b' }}>Skip to Final</button>
+            ) : (
+              <>
+                <button onClick={() => handleRematch('simulate')} style={s.playAgainBtn}>Rematch</button>
+                <button onClick={() => handleRematch('watch')} style={{ ...s.playAgainBtn, background: '#22c55e' }}>Rematch (Watch)</button>
+                <button onClick={newMatchup} style={{ ...s.playAgainBtn, background: '#334155' }}>New Matchup</button>
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -347,48 +293,119 @@ export default function OneOnOnePage() {
   }
 
   // ===================== PLAYER SELECTION SCREEN =====================
-  // Main UI: two side-by-side PlayerPicker panels with a VS divider.
-  // Popular Matchups section shown only when neither player is selected.
   return (
     <div style={s.container}>
       <button onClick={() => navigate('/menu')} style={s.backBtn}>&larr; Main Menu</button>
       <h1 style={s.title}>One on One</h1>
-      <p style={s.subtitle}>Pick any two active NBA players. First to 21 wins.</p>
+      <p style={s.subtitle}>Type a full player name. The CPU will pick its own challenger.</p>
       {error && <div style={s.error}>{error}</div>}
 
-      {/* Popular Matchups — only shown before any player is selected */}
-      {!playerA && !playerB && (
-        <div style={s.matchupsSection}>
-          <h3 style={s.matchupsTitle}>Popular Matchups</h3>
-          <div style={s.matchupsGrid}>
-            {POPULAR_MATCHUPS.map(m => (
-              <button key={m.label} onClick={() => loadMatchup(m.a, m.b, m.label)}
-                disabled={!!loadingMatchup}
-                style={s.matchupBtn}>
-                {loadingMatchup === m.label ? '...' : m.label}
-              </button>
-            ))}
-            <button onClick={loadRandomMatchup} disabled={!!loadingMatchup}
-              style={{ ...s.matchupBtn, background: '#f97316', color: '#fff', border: 'none' }}>
-              {loadingMatchup === 'Random' ? '...' : 'Random Matchup'}
-            </button>
-          </div>
-        </div>
-      )}
-
       <div style={s.pickersRow}>
-        <PlayerPicker label="Your Player" search={searchA} setSearch={setSearchA}
-          results={resultsA} setResults={setResultsA}
-          selected={playerA} setSelected={setPlayerA} color="#3b82f6" />
+        {/* ----- USER PICKER ----- */}
+        <div style={s.pickerPanel}>
+          <h3 style={{ ...s.pickerTitle, color: '#3b82f6' }}>Your Player</h3>
+          {playerA ? (
+            <div style={s.selectedCard}>
+              <div style={{ ...s.selectedRating, background: '#3b82f6' }}>{playerA.rating}</div>
+              <div>
+                <div style={s.selectedName}>{playerA.firstName} {playerA.lastName}</div>
+                <div style={s.selectedMeta}>{playerA.position} | {playerA.team}</div>
+              </div>
+              <button
+                onClick={() => { setPlayerA(null); setPlayerB(null); setSearchA(''); setResultsA([]); }}
+                style={s.changeBtn}
+              >
+                Change
+              </button>
+            </div>
+          ) : (
+            <>
+              <div style={s.searchRow}>
+                <input
+                  type="text"
+                  placeholder="Type full name (e.g. LeBron James)"
+                  value={searchA}
+                  onChange={e => setSearchA(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && searchPlayers(searchA)}
+                  style={s.input}
+                />
+                <button
+                  onClick={() => searchPlayers(searchA)}
+                  disabled={searchLoading || !searchA.trim()}
+                  style={{ ...s.searchBtn, background: '#3b82f6', opacity: !searchA.trim() ? 0.5 : 1 }}
+                >
+                  {searchLoading ? '...' : 'Search'}
+                </button>
+              </div>
+              {searchLoading ? (
+                <p style={{ color: '#94a3b8', fontSize: 13, textAlign: 'center', padding: 16 }}>Searching...</p>
+              ) : resultsA.length > 0 ? (
+                <div style={s.resultsList}>
+                  {resultsA.map(p => (
+                    <button key={p.id} onClick={() => setPlayerA(p)} style={s.resultItem}>
+                      <span style={s.resultName}>{p.firstName} {p.lastName}</span>
+                      <span style={s.resultMeta}>{p.position} | {p.team}</span>
+                      <span style={{ ...s.resultRating, background: '#3b82f6' }}>{p.rating}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p style={{ color: '#64748b', fontSize: 12, padding: '12px 4px', textAlign: 'center' }}>
+                  Enter a full player name and press Search.
+                </p>
+              )}
+            </>
+          )}
+        </div>
+
         <div style={s.vsCenter}>VS</div>
-        <PlayerPicker label="CPU Player" search={searchB} setSearch={setSearchB}
-          results={resultsB} setResults={setResultsB}
-          selected={playerB} setSelected={setPlayerB} color="#ef4444" />
+
+        {/* ----- CPU PANEL (auto-picked) ----- */}
+        <div style={s.pickerPanel}>
+          <h3 style={{ ...s.pickerTitle, color: '#ef4444' }}>CPU Player</h3>
+          {!playerA ? (
+            <p style={{ color: '#64748b', fontSize: 13, padding: '20px 4px', textAlign: 'center' }}>
+              Pick your player first — the CPU will respond.
+            </p>
+          ) : cpuPicking ? (
+            <p style={{ color: '#94a3b8', fontSize: 13, textAlign: 'center', padding: 24 }}>
+              CPU is choosing an opponent...
+            </p>
+          ) : playerB ? (
+            <div style={s.selectedCard}>
+              <div style={{ ...s.selectedRating, background: '#ef4444' }}>{playerB.rating}</div>
+              <div>
+                <div style={s.selectedName}>{playerB.firstName} {playerB.lastName}</div>
+                <div style={s.selectedMeta}>{playerB.position} | {playerB.team}</div>
+                <div style={{ color: '#64748b', fontSize: 11, marginTop: 4 }}>
+                  CPU matched position: {positionGroup(playerA.position)}
+                </div>
+              </div>
+              <button onClick={() => pickCpuOpponent(playerA)} style={s.changeBtn}>Re-roll</button>
+            </div>
+          ) : (
+            <p style={{ color: '#fca5a5', fontSize: 13, padding: 16, textAlign: 'center' }}>
+              CPU could not find a match.{' '}
+              <button onClick={() => pickCpuOpponent(playerA)} style={{ ...s.changeBtn, marginLeft: 4 }}>Retry</button>
+            </p>
+          )}
+        </div>
       </div>
-      <div style={{ textAlign: 'center', marginTop: 24 }}>
-        <button onClick={handleSimulate} disabled={!playerA || !playerB || loading}
-          style={!playerA || !playerB ? { ...s.simBtn, opacity: 0.5 } : s.simBtn}>
-          {loading ? 'Simulating...' : 'Start Game'}
+
+      <div style={{ textAlign: 'center', marginTop: 24, display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
+        <button
+          onClick={handleSimulate}
+          disabled={!playerA || !playerB || loading}
+          style={!playerA || !playerB ? { ...s.simBtn, opacity: 0.5 } : s.simBtn}
+        >
+          {loading ? 'Simulating...' : 'Simulate Game'}
+        </button>
+        <button
+          onClick={handleWatch}
+          disabled={!playerA || !playerB || loading}
+          style={!playerA || !playerB ? { ...s.simBtn, background: '#22c55e', opacity: 0.5 } : { ...s.simBtn, background: '#22c55e' }}
+        >
+          Watch Play-by-Play
         </button>
       </div>
     </div>
@@ -396,7 +413,6 @@ export default function OneOnOnePage() {
 }
 
 // ===================== STYLES =====================
-// All inline styles for this page (no CSS files).
 const s = {
   container: { minHeight: '100vh', background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)', color: '#e2e8f0', padding: 24 },
   backBtn: { background: 'none', border: 'none', color: '#60a5fa', cursor: 'pointer', fontSize: 14, fontWeight: 600, marginBottom: 12, display: 'block' },
@@ -420,15 +436,7 @@ const s = {
   selectedName: { fontWeight: 700, fontSize: 18 },
   selectedMeta: { color: '#94a3b8', fontSize: 13 },
   changeBtn: { marginLeft: 'auto', padding: '6px 14px', borderRadius: 6, border: 'none', background: '#334155', color: '#e2e8f0', cursor: 'pointer', fontWeight: 600, fontSize: 12 },
-  simBtn: { padding: '14px 40px', borderRadius: 10, border: 'none', background: '#3b82f6', color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: 18 },
-  // Matchups
-  matchupsSection: { maxWidth: 700, margin: '0 auto 20px', textAlign: 'center' },
-  matchupsTitle: { color: '#94a3b8', fontSize: 14, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 10 },
-  matchupsGrid: { display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'center' },
-  matchupBtn: { padding: '8px 16px', borderRadius: 8, border: '1px solid #334155', background: '#1e293b', color: '#e2e8f0', fontWeight: 600, cursor: 'pointer', fontSize: 13, transition: 'all 0.2s' },
-  // Era badges
-  eraBadge: { display: 'inline-block', padding: '2px 8px', borderRadius: 4, fontSize: 11, fontWeight: 700, marginTop: 4 },
-  eraBadgeSmall: { fontSize: 10, fontWeight: 700 },
+  simBtn: { padding: '14px 32px', borderRadius: 10, border: 'none', background: '#3b82f6', color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: 18 },
   // Results
   resultCard: { maxWidth: 700, margin: '0 auto', background: '#1e293b', borderRadius: 16, padding: 24 },
   resultTitle: { color: '#3b82f6', textAlign: 'center', fontSize: 28, margin: '0 0 16px', fontWeight: 800 },
@@ -441,5 +449,5 @@ const s = {
   playLog: { maxHeight: 350, overflowY: 'auto', background: '#0f172a', borderRadius: 8, padding: 8 },
   playEntry: { padding: '6px 10px', borderBottom: '1px solid #1e293b', fontSize: 13, color: '#cbd5e1', display: 'flex', gap: 10 },
   playScore: { color: '#64748b', minWidth: 50, fontSize: 12, fontWeight: 600 },
-  playAgainBtn: { padding: '12px 32px', borderRadius: 8, border: 'none', background: '#3b82f6', color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: 16 },
+  playAgainBtn: { padding: '12px 28px', borderRadius: 8, border: 'none', background: '#3b82f6', color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: 15 },
 };

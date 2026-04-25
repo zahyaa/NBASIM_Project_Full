@@ -55,19 +55,34 @@ router.get('/teams', async (req, res) => {
   }
 });
 
-// GET /api/nba/players/search?q=LeBron — search players by name
+// GET /api/nba/players/search?q=LeBron — search players by name.
+// balldontlie's `search` parameter only matches a single token against either
+// first OR last name, so for multi-word queries (e.g. "Stephen Curry") we send
+// the longest token to the API and then post-filter results so every token
+// appears somewhere in the player's full name.
 router.get('/players/search', async (req, res) => {
   try {
     const q = String(req.query.q || '').trim();
     if (!q) return res.status(400).json({ error: 'Search query required' });
-    const params = { search: q, per_page: 50 };
+    const tokens = q.split(/\s+/).filter(Boolean);
+    // Use the longest token (usually the last name) for the API search.
+    const apiToken = tokens.reduce((a, b) => (b.length > a.length ? b : a), tokens[0]);
+    const params = { search: apiToken, per_page: 50 };
     if (req.query.cursor) params.cursor = Number(req.query.cursor);
     const { data } = await axios.get(`${API_BASE}/players`, { headers: apiHeaders(), params });
 
-    // Paid tier: enrich search results with current-season averages.
-    const statsMap = await fetchSeasonAverages(data.data.map(p => p.id));
+    // Post-filter: every token in the query must appear in the player's full name.
+    const filtered = tokens.length > 1
+      ? data.data.filter(p => {
+          const full = `${p.first_name} ${p.last_name}`.toLowerCase();
+          return tokens.every(t => full.includes(t.toLowerCase()));
+        })
+      : data.data;
 
-    const players = data.data.map(p => {
+    // Paid tier: enrich search results with current-season averages.
+    const statsMap = await fetchSeasonAverages(filtered.map(p => p.id));
+
+    const players = filtered.map(p => {
       const sa = statsMap[p.id] || null;
       return {
         id: p.id,

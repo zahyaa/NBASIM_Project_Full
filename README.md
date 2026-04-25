@@ -144,6 +144,43 @@ Visit [http://localhost:3000](http://localhost:3000)
 
 ---
 
+## 🧪 Testing
+
+This project ships with two complementary test suites covering the backend in isolation and the full client + server flow end-to-end.
+
+### Backend — Jest + Supertest + mongodb-memory-server
+Unit / integration tests for Express routes and the simulation engine. Each run spins up an in-memory MongoDB instance so tests are fully isolated from the dev database.
+
+- **Location:** `server/tests/`
+  - `auth.test.js` — register/login/`/me` flows, password validation, JWT issuance, rate-limit behavior
+  - `simulation.test.js` — 1v1, blacktop, and 5v5 simulation engine output shape and scoring rules
+  - `setup.js` / `globalSetup.js` / `globalTeardown.js` / `env.js` — Mongo memory-server lifecycle and env stubs
+- **Run:**
+  ```bash
+  cd server && npm test
+  ```
+
+### End-to-End — Playwright
+Browser-driven tests exercising the real React app against the real Express server, using Chromium.
+
+- **Config:** `playwright.config.js` (assumes servers on `:3000` and `:5001`; set `START_SERVERS=1` to auto-spawn)
+- **Specs:** `e2e/`
+  - `auth.spec.js` — register, land on menu, logout; bad-password rejection
+  - `game-modes.spec.js` — navigation smoke tests for 1v1 and Blacktop
+  - `1v1-simulation.spec.js` — full-name search, CPU auto-pick, **Simulate Game** instant flow, and **Watch Play-by-Play** animated flow with skip
+  - `blacktop-simulation.spec.js` — build two 1v1 teams, simulate, verify scoreboard / winner / Rematch
+  - `fixtures.js` — per-test fresh user fixture so the suite is idempotent
+- **Run:**
+  ```bash
+  npx playwright test            # all specs, headless
+  npm run test:e2e:ui            # interactive UI runner
+  npm run test:e2e:headed        # watch tests run in a real browser
+  ```
+
+> A development auth rate limit of 500 requests/window (vs. 20 in production) is set in `server/server.js` so the E2E suite can register/login many users without hitting 429s.
+
+---
+
 ## 📝 Notes
 
 - Port 5001 is used instead of 5000 (macOS AirPlay Receiver occupies 5000)
