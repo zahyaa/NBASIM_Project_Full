@@ -1,0 +1,25 @@
+# Render single-service deploy: Express serves /api/* AND the built React app.
+# To deploy:
+#   1. Push to GitHub
+#   2. On render.com → New → Blueprint → connect this repo
+#   3. Set the env vars below in the Render dashboard (NOT committed to git)
+services:
+  - type: web
+    name: nbasim
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: 20.18.0
+      - key: JWT_SECRET
+        sync: false        # set this manually in the Render dashboard
+      - key: BALLDONTLIE_API_KEY
+        sync: false        # set this manually in the Render dashboard
+      - key: MONGODB_URI
+        sync: false        # MongoDB Atlas connection string
+      - key: CORS_ORIGIN
+        sync: false        # e.g. https://nbasim.onrender.com (or your custom domain)

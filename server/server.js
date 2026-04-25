@@ -82,6 +82,20 @@ app.use('/api/simulate', simulateRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/upload', uploadRoutes);
 
+// In production (single-service deploy), serve the built React app from this
+// same Express server so frontend and backend ship together. The build is
+// produced by `cd client && npm run build` (see `npm run build` in the root
+// package.json). In dev, CRA serves the client on :3000 with a /api proxy.
+if (process.env.NODE_ENV === 'production') {
+  const path = require('path');
+  const clientBuild = path.join(__dirname, '..', 'client', 'build');
+  app.use(express.static(clientBuild));
+  // SPA fallback: any non-/api GET returns index.html so React Router handles it.
+  app.get(/^\/(?!api\/).*/, (req, res) => {
+    res.sendFile(path.join(clientBuild, 'index.html'));
+  });
+}
+
 const PORT = process.env.PORT || 5001;
 if (!isTest) {
   app.listen(PORT, () => console.log(`Server running on port ${PORT}`));

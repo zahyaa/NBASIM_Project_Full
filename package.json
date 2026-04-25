@@ -1,5 +1,7 @@
 {
   "scripts": {
+    "build": "cd server && npm install --omit=dev && cd ../client && npm install && CI=false NODE_OPTIONS=--openssl-legacy-provider npm run build",
+    "start": "cd server && node server.js",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:headed": "playwright test --headed"

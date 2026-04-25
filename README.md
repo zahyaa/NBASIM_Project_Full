@@ -181,7 +181,36 @@ Browser-driven tests exercising the real React app against the real Express serv
 
 ---
 
-## 📝 Notes
+## � Deploy (single service)
+
+This app ships as **one Web Service** on [Render](https://render.com): Express handles `/api/*` and serves the built React app for everything else. Frontend + backend live behind one domain — no separate static host, no CORS gymnastics.
+
+### Prerequisites
+- A free **MongoDB Atlas** cluster — copy its connection string
+- A **balldontlie** API key
+- A long random **JWT_SECRET** (`openssl rand -hex 64`)
+
+### Steps
+1. Push this repo to GitHub.
+2. On Render: **New → Blueprint → connect this repo**. The included [render.yaml](render.yaml) wires up build + start commands automatically.
+3. In the Render dashboard set these env vars (the blueprint marks them `sync: false` so they aren't committed):
+   - `JWT_SECRET`
+   - `BALLDONTLIE_API_KEY`
+   - `MONGODB_URI` — Atlas SRV string
+   - `CORS_ORIGIN` — your service URL, e.g. `https://nbasim.onrender.com`
+4. In Atlas, allow Render's egress IPs (or `0.0.0.0/0` for the free tier).
+5. Render runs:
+   ```bash
+   npm install && npm run build      # builds client/build/
+   npm start                          # node server/server.js
+   ```
+6. Visit your Render URL — the React app and API are both served from it.
+
+The same setup works on **Railway** or **Fly.io** with the same `npm run build` / `npm start` scripts. For a custom domain, point CNAME → your Render hostname and update `CORS_ORIGIN`.
+
+---
+
+## �📝 Notes
 
 - Port 5001 is used instead of 5000 (macOS AirPlay Receiver occupies 5000)
 - `NODE_OPTIONS=--openssl-legacy-provider` is required for react-scripts 3.x on Node 17+
