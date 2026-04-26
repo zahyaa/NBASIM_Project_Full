@@ -284,7 +284,7 @@ function BioDetail({ bio, games, loading, onBack, isFav, onToggleFav }) {
       </div>
 
       <div style={s.bioHeader}>
-        <Avatar firstName={bio.firstName} lastName={bio.lastName} color={bio.era?.color} />
+        <Avatar firstName={bio.firstName} lastName={bio.lastName} color={bio.era?.color} photoUrl={bio.photoUrl} />
         <div style={{ flex: 1 }}>
           <h2 style={s.bioName}>{bio.firstName} {bio.lastName}</h2>
           <p style={s.bioTeam}>
@@ -526,11 +526,20 @@ function CompareCard({ bio, other, onClear }) {
   const advA = bio.stats ? computeAdvanced(bio.stats) : null;
   return (
     <div style={s.compareCard}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h3 style={{ margin: 0, fontSize: 18 }}>{bio.firstName} {bio.lastName}</h3>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flex: 1, minWidth: 0 }}>
+          <Avatar firstName={bio.firstName} lastName={bio.lastName} color={bio.era?.color} photoUrl={bio.photoUrl} size={48} />
+          <div style={{ minWidth: 0 }}>
+            <h3 style={{ margin: 0, fontSize: 16, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {bio.firstName} {bio.lastName}
+            </h3>
+            <div style={{ color: '#94a3b8', fontSize: 11, marginTop: 2 }}>
+              {bio.position || '—'} · Rating {bio.rating ?? '—'}
+            </div>
+          </div>
+        </div>
         <button onClick={onClear} style={s.compareClear}>×</button>
       </div>
-      <div style={{ color: '#94a3b8', fontSize: 12, marginTop: 4 }}>{bio.position || '—'} · {bio.team || '—'} · Rating {bio.rating ?? '—'}</div>
 
       <div style={{ marginTop: 14 }}>
         {COMPARE_STATS.map(([key, label, dec, higherBetter, isPct]) => {
@@ -593,15 +602,27 @@ const Badge = ({ children, color = '#a855f7' }) => (
   </span>
 );
 
-const Avatar = ({ firstName = '', lastName = '', color = '#a855f7' }) => {
+const Avatar = ({ firstName = '', lastName = '', color = '#a855f7', photoUrl = null, size = 72 }) => {
   const initials = `${firstName?.[0] || ''}${lastName?.[0] || ''}`.toUpperCase();
+  const [failed, setFailed] = useState(false);
+  const showPhoto = photoUrl && !failed;
   return (
     <div style={{
-      width: 72, height: 72, borderRadius: '50%',
+      width: size, height: size, borderRadius: '50%',
       background: `linear-gradient(135deg, ${color}, ${color}88)`,
       display: 'flex', alignItems: 'center', justifyContent: 'center',
-      fontWeight: 800, fontSize: 26, color: '#fff', flexShrink: 0,
-    }}>{initials || '?'}</div>
+      fontWeight: 800, fontSize: size * 0.36, color: '#fff', flexShrink: 0,
+      overflow: 'hidden', position: 'relative',
+    }}>
+      {showPhoto ? (
+        <img
+          src={photoUrl}
+          alt={`${firstName} ${lastName}`}
+          onError={() => setFailed(true)}
+          style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top center' }}
+        />
+      ) : (initials || '?')}
+    </div>
   );
 };
 

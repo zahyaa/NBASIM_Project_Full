@@ -2,6 +2,7 @@ const express = require('express');
 const axios = require('axios');
 const { calculateRating, calculateRatingFromProfile, getPlayerEra } = require('../services/playerRating');
 const { getTeamLogoUrl, getTeamLogoEspn } = require('../services/nbaImages');
+const { getPlayerPhotoUrl } = require('../services/playerPhoto');
 const auth = require('../middleware/auth');
 const router = express.Router();
 
@@ -137,6 +138,10 @@ router.get('/players/:id/bio', async (req, res) => {
     const currentStats = seasonResults[0].stats;
     const careerHistory = seasonResults.filter(s => s.stats);
 
+    // Try to resolve a headshot in parallel with the response shape build.
+    // This is best-effort and never blocks the response on errors.
+    const photoUrl = await getPlayerPhotoUrl(player.first_name, player.last_name);
+
     res.json({
       id: player.id,
       firstName: player.first_name,
@@ -158,6 +163,7 @@ router.get('/players/:id/bio', async (req, res) => {
       era: getPlayerEra(player.draft_year),
       stats: currentStats,
       careerHistory,
+      photoUrl,
     });
   } catch (err) {
     res.status(502).json({ error: 'Failed to fetch player bio', details: err.message });
