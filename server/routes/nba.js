@@ -110,7 +110,7 @@ router.get('/players/search', async (req, res) => {
   }
 });
 
-// GET /api/nba/players/:id/bio — full player profile + career stats
+// GET /api/nba/players/:id/bio — full player profile + current + career stats
 router.get('/players/:id/bio', async (req, res) => {
   try {
     const season = Number(req.query.season) || CURRENT_SEASON;
@@ -119,17 +119,23 @@ router.get('/players/:id/bio', async (req, res) => {
     });
     const player = playerData.data;
 
-    // Paid tier: pull current-season averages directly.
-    let seasonAvg = null;
-    try {
-      const { data: statsData } = await axios.get(
-        `${API_BASE}/season_averages?season=${season}&player_ids[]=${player.id}`,
-        { headers: apiHeaders() }
-      );
-      seasonAvg = statsData.data[0] || null;
-    } catch (err) {
-      console.warn('[nba] bio season_averages failed:', err.response?.status || err.message);
-    }
+    // Pull current season + last 4 prior seasons in parallel for the history table.
+    const seasons = [season, season - 1, season - 2, season - 3, season - 4];
+    const seasonResults = await Promise.all(seasons.map(async (yr) => {
+      try {
+        const { data } = await axios.get(
+          `${API_BASE}/season_averages?season=${yr}&player_ids[]=${player.id}`,
+          { headers: apiHeaders() }
+        );
+        return { season: yr, stats: data.data[0] || null };
+      } catch (err) {
+        console.warn(`[nba] season_averages ${yr} failed:`, err.response?.status || err.message);
+        return { season: yr, stats: null };
+      }
+    }));
+
+    const currentStats = seasonResults[0].stats;
+    const careerHistory = seasonResults.filter(s => s.stats);
 
     res.json({
       id: player.id,
@@ -142,17 +148,76 @@ router.get('/players/:id/bio', async (req, res) => {
       conference: player.team ? player.team.conference : '',
       height: player.height,
       weight: player.weight,
-      jersey: player.jersey_number,
+      jerseyNumber: player.jersey_number,
       country: player.country,
+      college: player.college,
       draftYear: player.draft_year,
       draftRound: player.draft_round,
       draftNumber: player.draft_number,
-      rating: seasonAvg ? calculateRating(seasonAvg) : calculateRatingFromProfile(player),
+      rating: currentStats ? calculateRating(currentStats) : calculateRatingFromProfile(player),
       era: getPlayerEra(player.draft_year),
-      seasonAverage: seasonAvg,
+      stats: currentStats,
+      careerHistory,
     });
   } catch (err) {
     res.status(502).json({ error: 'Failed to fetch player bio', details: err.message });
+  }
+});
+
+// GET /api/nba/players/:id/games?limit=10 — recent regular-season games for a player
+router.get('/players/:id/games', async (req, res) => {
+  try {
+    const playerId = Number(req.params.id);
+    const limit = Math.min(20, Number(req.query.limit) || 10);
+    const seasons = [CURRENT_SEASON, CURRENT_SEASON - 1];
+    // Pull a generous page across two seasons; we'll sort and trim.
+    const all = [];
+    for (const yr of seasons) {
+      try {
+        const { data } = await axios.get(`${API_BASE}/stats`, {
+          headers: apiHeaders(),
+          params: {
+            'player_ids[]': playerId,
+            'seasons[]': yr,
+            postseason: false,
+            per_page: 100,
+          },
+        });
+        for (const row of data.data || []) all.push(row);
+      } catch (err) {
+        console.warn(`[nba] stats ${yr} failed:`, err.response?.status || err.message);
+      }
+      // Stop early once we have enough recent games from the current season.
+      if (all.length >= limit) break;
+    }
+
+    all.sort((a, b) => new Date(b.game.date) - new Date(a.game.date));
+    const games = all.slice(0, limit).map(g => ({
+      gameId: g.game.id,
+      date: g.game.date,
+      homeTeamId: g.game.home_team_id,
+      visitorTeamId: g.game.visitor_team_id,
+      homeScore: g.game.home_team_score,
+      visitorScore: g.game.visitor_team_score,
+      playerTeamId: g.team.id,
+      opponent: g.team.id === g.game.home_team_id
+        ? { id: g.game.visitor_team_id, label: '@' }
+        : { id: g.game.home_team_id, label: 'vs' },
+      min: g.min,
+      pts: g.pts,
+      reb: g.reb,
+      ast: g.ast,
+      stl: g.stl,
+      blk: g.blk,
+      tov: g.turnover,
+      fgm: g.fgm, fga: g.fga,
+      fg3m: g.fg3m, fg3a: g.fg3a,
+      ftm: g.ftm, fta: g.fta,
+    }));
+
+    res.json({ games });
+  } catch (err) {
+    res.status(502).json({ error: 'Failed to fetch player games', details: err.message });
   }
 });
 
