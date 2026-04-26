@@ -66,4 +66,69 @@ router.get('/me', auth, async (req, res) => {
   }
 });
 
+// GET /api/auth/favorites — list the user's favorited NBA players
+router.get('/favorites', auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.userId).select('favoritePlayers');
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    res.json({ favorites: user.favoritePlayers || [] });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/auth/favorites — add or update a favorite. Body: { player: {...} }
+router.post('/favorites', auth, async (req, res) => {
+  try {
+    const p = req.body.player || {};
+    const playerId = Number(p.playerId ?? p.id);
+    if (!playerId) return res.status(400).json({ error: 'player.playerId is required' });
+
+    const entry = {
+      playerId,
+      firstName: p.firstName || '',
+      lastName: p.lastName || '',
+      position: p.position || '',
+      team: p.team || '',
+      teamLogo: p.teamLogo || '',
+      rating: typeof p.rating === 'number' ? p.rating : null,
+      addedAt: new Date(),
+    };
+
+    const user = await User.findById(req.userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    // Cap favorites at 50 to prevent unbounded growth.
+    const existing = user.favoritePlayers || [];
+    const idx = existing.findIndex(f => f.playerId === playerId);
+    if (idx >= 0) {
+      existing[idx] = entry; // refresh snapshot
+    } else {
+      if (existing.length >= 50) {
+        return res.status(400).json({ error: 'Favorites limit (50) reached' });
+      }
+      existing.unshift(entry);
+    }
+    user.favoritePlayers = existing;
+    await user.save();
+    res.json({ favorites: user.favoritePlayers });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/auth/favorites/:playerId — remove a favorite
+router.delete('/favorites/:playerId', auth, async (req, res) => {
+  try {
+    const playerId = Number(req.params.playerId);
+    const user = await User.findById(req.userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    user.favoritePlayers = (user.favoritePlayers || []).filter(f => f.playerId !== playerId);
+    await user.save();
+    res.json({ favorites: user.favoritePlayers });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;

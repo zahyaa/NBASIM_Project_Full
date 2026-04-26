@@ -22,6 +22,9 @@ export default function PlayerBioPage() {
   const { token } = useAuth();
   const navigate = useNavigate();
 
+  // Mode: 'browse' (search + favorites + bio detail) or 'compare' (two-up).
+  const [mode, setMode] = useState('browse');
+
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
   const [searching, setSearching] = useState(false);
@@ -34,9 +37,65 @@ export default function PlayerBioPage() {
   const [bioLoading, setBioLoading] = useState(false);
   const [games, setGames] = useState([]);
 
+  // Favorites
+  const [favorites, setFavorites] = useState([]);
+
   const authHeaders = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
   const debounceRef = useRef(null);
   const reqRef = useRef(0);
+
+  // Load favorites once on mount.
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const res = await fetch('/api/auth/favorites', { headers: authHeaders });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (alive) setFavorites(data.favorites || []);
+      } catch { /* non-fatal */ }
+    })();
+    return () => { alive = false; };
+  }, [authHeaders]);
+
+  const isFavorited = (id) => favorites.some(f => f.playerId === id);
+
+  const toggleFavorite = async (player) => {
+    const id = player.playerId ?? player.id;
+    if (!id) return;
+    try {
+      if (isFavorited(id)) {
+        const res = await fetch(`/api/auth/favorites/${id}`, { method: 'DELETE', headers: authHeaders });
+        if (!res.ok) throw new Error('Could not remove favorite');
+        const data = await res.json();
+        setFavorites(data.favorites || []);
+      } else {
+        const res = await fetch('/api/auth/favorites', {
+          method: 'POST',
+          headers: { ...authHeaders, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            player: {
+              playerId: id,
+              firstName: player.firstName,
+              lastName: player.lastName,
+              position: player.position,
+              team: player.team,
+              teamLogo: player.teamLogo,
+              rating: player.rating,
+            },
+          }),
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error || 'Could not save favorite');
+        }
+        const data = await res.json();
+        setFavorites(data.favorites || []);
+      }
+    } catch (err) {
+      setError(err.message);
+    }
+  };
 
   // Debounced search: fires 300ms after the user stops typing.
   useEffect(() => {
@@ -121,9 +180,22 @@ export default function PlayerBioPage() {
       <h1 style={s.title}>Players Bio</h1>
       <p style={s.subtitle}>Search active NBA players. Stats update live during the season.</p>
 
-      {error && <div style={s.error}>{error}</div>}
+      {error && (
+        <div style={s.error} onClick={() => setError('')}>{error} <span style={{ opacity: 0.6, marginLeft: 8 }}>(dismiss)</span></div>
+      )}
 
       {!bio && (
+        <div style={s.tabsRow}>
+          <button onClick={() => setMode('browse')} style={{ ...s.tabBtn, ...(mode === 'browse' ? s.tabBtnActive : {}) }}>Browse</button>
+          <button onClick={() => setMode('compare')} style={{ ...s.tabBtn, ...(mode === 'compare' ? s.tabBtnActive : {}) }}>Compare</button>
+        </div>
+      )}
+
+      {!bio && mode === 'compare' && (
+        <ComparePanel authHeaders={authHeaders} onError={setError} />
+      )}
+
+      {!bio && mode === 'browse' && (
         <>
           <div style={s.searchBar}>
             <input
@@ -146,19 +218,29 @@ export default function PlayerBioPage() {
               options={[['rating', 'Rating'], ['ppg', 'PPG'], ['name', 'Name']]} />
           </div>
 
+          {!query.trim() && favorites.length > 0 && (
+            <div style={{ maxWidth: 900, margin: '0 auto 24px' }}>
+              <h3 style={s.sectionTitle}>★ Your Favorites ({favorites.length})</h3>
+              <div style={s.resultsGrid}>
+                {favorites.map(p => (
+                  <PlayerTile key={p.playerId} p={{ ...p, id: p.playerId }}
+                    onClick={() => handleSelectPlayer({ ...p, id: p.playerId })}
+                    isFav={true}
+                    onToggleFav={(e) => { e.stopPropagation(); toggleFavorite(p); }}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
           {filteredResults.length > 0 && (
             <div style={s.resultsGrid}>
               {filteredResults.map(p => (
-                <button key={p.id} onClick={() => handleSelectPlayer(p)} style={s.playerTile}>
-                  {p.teamLogo && (
-                    <img src={p.teamLogo} alt="" style={s.tileLogo} onError={e => e.target.style.display='none'} />
-                  )}
-                  <div style={s.tileRating}>{p.rating}</div>
-                  <div style={s.tileName}>{p.firstName} {p.lastName}</div>
-                  <div style={s.tileMeta}>{p.position || 'N/A'} | {p.team}</div>
-                  {p.stats && <div style={s.tilePpg}>{p.stats.pts?.toFixed(1)} PPG</div>}
-                  {p.era && <div style={{ color: p.era.color, fontSize: 11, fontWeight: 700, marginTop: 4 }}>{p.era.era}</div>}
-                </button>
+                <PlayerTile key={p.id} p={p}
+                  onClick={() => handleSelectPlayer(p)}
+                  isFav={isFavorited(p.id)}
+                  onToggleFav={(e) => { e.stopPropagation(); toggleFavorite({ ...p, playerId: p.id }); }}
+                />
               ))}
             </div>
           )}
@@ -166,14 +248,21 @@ export default function PlayerBioPage() {
           {!searching && query.trim() && filteredResults.length === 0 && (
             <div style={s.empty}>No players match "{query}"{position !== 'ALL' ? ` at ${position}` : ''}.</div>
           )}
-          {!query.trim() && (
-            <div style={s.empty}>Try "LeBron", "Curry", or "Jokic".</div>
+          {!query.trim() && favorites.length === 0 && (
+            <div style={s.empty}>Try "LeBron", "Curry", or "Jokic". Star players to pin them here.</div>
           )}
         </>
       )}
 
       {bio && (
-        <BioDetail bio={bio} games={games} loading={bioLoading} onBack={closeBio} />
+        <BioDetail
+          bio={bio}
+          games={games}
+          loading={bioLoading}
+          onBack={closeBio}
+          isFav={isFavorited(bio.id)}
+          onToggleFav={() => toggleFavorite({ ...bio, playerId: bio.id })}
+        />
       )}
     </div>
   );
@@ -181,11 +270,18 @@ export default function PlayerBioPage() {
 
 /* ---------------- BioDetail ---------------- */
 
-function BioDetail({ bio, games, loading, onBack }) {
+function BioDetail({ bio, games, loading, onBack, isFav, onToggleFav }) {
   const adv = bio.stats ? computeAdvanced(bio.stats) : null;
   return (
     <div style={s.bioCard}>
-      <button onClick={onBack} style={s.bioBack}>&larr; Back to results</button>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <button onClick={onBack} style={s.bioBack}>&larr; Back to results</button>
+        {onToggleFav && (
+          <button onClick={onToggleFav} style={{ ...s.starBtn, ...(isFav ? s.starBtnOn : {}) }}>
+            {isFav ? '★ Favorited' : '☆ Add to Favorites'}
+          </button>
+        )}
+      </div>
 
       <div style={s.bioHeader}>
         <Avatar firstName={bio.firstName} lastName={bio.lastName} color={bio.era?.color} />
@@ -317,6 +413,168 @@ function BioDetail({ bio, games, loading, onBack }) {
 
 /* ---------------- small components ---------------- */
 
+const PlayerTile = ({ p, onClick, isFav, onToggleFav }) => (
+  <div style={s.playerTileWrap}>
+    <button onClick={onClick} style={s.playerTile}>
+      {p.teamLogo && (
+        <img src={p.teamLogo} alt="" style={s.tileLogo} onError={e => e.target.style.display='none'} />
+      )}
+      <div style={s.tileRating}>{p.rating ?? '—'}</div>
+      <div style={s.tileName}>{p.firstName} {p.lastName}</div>
+      <div style={s.tileMeta}>{p.position || 'N/A'} | {p.team}</div>
+      {p.stats && <div style={s.tilePpg}>{p.stats.pts?.toFixed(1)} PPG</div>}
+      {p.era && <div style={{ color: p.era.color, fontSize: 11, fontWeight: 700, marginTop: 4 }}>{p.era.era}</div>}
+    </button>
+    {onToggleFav && (
+      <button onClick={onToggleFav} style={{ ...s.tileStar, ...(isFav ? s.tileStarOn : {}) }} title={isFav ? 'Remove from favorites' : 'Add to favorites'}>
+        {isFav ? '★' : '☆'}
+      </button>
+    )}
+  </div>
+);
+
+/**
+ * ComparePanel — two independent search boxes; selecting players loads
+ * their bios side by side with stat winners highlighted in green.
+ */
+function ComparePanel({ authHeaders, onError }) {
+  const [a, setA] = useState(null);
+  const [b, setB] = useState(null);
+
+  const loadBio = async (id, setter) => {
+    try {
+      const res = await fetch(`/api/nba/players/${id}/bio`, { headers: authHeaders });
+      if (!res.ok) throw new Error('Failed to load player');
+      setter(await res.json());
+    } catch (err) {
+      onError(err.message);
+    }
+  };
+
+  return (
+    <div style={s.compareWrap}>
+      <div style={s.compareCol}>
+        {!a ? (
+          <CompareSearch authHeaders={authHeaders} placeholder="Player A" onPick={(p) => loadBio(p.id, setA)} />
+        ) : (
+          <CompareCard bio={a} other={b} onClear={() => setA(null)} />
+        )}
+      </div>
+      <div style={s.compareVs}>VS</div>
+      <div style={s.compareCol}>
+        {!b ? (
+          <CompareSearch authHeaders={authHeaders} placeholder="Player B" onPick={(p) => loadBio(p.id, setB)} />
+        ) : (
+          <CompareCard bio={b} other={a} onClear={() => setB(null)} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function CompareSearch({ authHeaders, placeholder, onPick }) {
+  const [q, setQ] = useState('');
+  const [list, setList] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const tRef = useRef(null);
+
+  useEffect(() => {
+    if (!q.trim()) { setList([]); return; }
+    if (tRef.current) clearTimeout(tRef.current);
+    setLoading(true);
+    tRef.current = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/nba/players/search?q=${encodeURIComponent(q)}`, { headers: authHeaders });
+        if (!res.ok) throw new Error();
+        const data = await res.json();
+        setList((data.data || []).slice(0, 8));
+      } catch { setList([]); }
+      finally { setLoading(false); }
+    }, 300);
+    return () => tRef.current && clearTimeout(tRef.current);
+  }, [q, authHeaders]);
+
+  return (
+    <div>
+      <input value={q} onChange={e => setQ(e.target.value)} placeholder={placeholder} style={s.searchInput} />
+      <div style={{ marginTop: 8, fontSize: 12, color: '#64748b' }}>{loading ? 'Searching…' : ''}</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
+        {list.map(p => (
+          <button key={p.id} onClick={() => onPick(p)} style={s.compareSearchItem}>
+            <span style={{ fontWeight: 700 }}>{p.firstName} {p.lastName}</span>
+            <span style={{ color: '#94a3b8', fontSize: 12 }}> · {p.position} · {p.team} · {p.rating}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+const COMPARE_STATS = [
+  ['pts', 'PPG', 1, true],
+  ['reb', 'RPG', 1, true],
+  ['ast', 'APG', 1, true],
+  ['stl', 'SPG', 1, true],
+  ['blk', 'BPG', 1, true],
+  ['fg_pct', 'FG%', 1, true, true],
+  ['fg3_pct', '3P%', 1, true, true],
+  ['ft_pct', 'FT%', 1, true, true],
+  ['turnover', 'TOV', 1, false],
+];
+
+function CompareCard({ bio, other, onClear }) {
+  const advA = bio.stats ? computeAdvanced(bio.stats) : null;
+  return (
+    <div style={s.compareCard}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <h3 style={{ margin: 0, fontSize: 18 }}>{bio.firstName} {bio.lastName}</h3>
+        <button onClick={onClear} style={s.compareClear}>×</button>
+      </div>
+      <div style={{ color: '#94a3b8', fontSize: 12, marginTop: 4 }}>{bio.position || '—'} · {bio.team || '—'} · Rating {bio.rating ?? '—'}</div>
+
+      <div style={{ marginTop: 14 }}>
+        {COMPARE_STATS.map(([key, label, dec, higherBetter, isPct]) => {
+          const av = bio.stats?.[key];
+          const bv = other?.stats?.[key];
+          const hasBoth = av != null && bv != null;
+          let win = false;
+          if (hasBoth) win = higherBetter ? av > bv : av < bv;
+          const text = av == null ? '—' : isPct ? `${(av * 100).toFixed(dec)}%` : Number(av).toFixed(dec);
+          return (
+            <div key={key} style={s.compareRow}>
+              <span style={{ color: '#64748b', fontSize: 12 }}>{label}</span>
+              <span style={{
+                fontWeight: 700,
+                color: win ? '#22c55e' : '#e2e8f0',
+              }}>{text}</span>
+            </div>
+          );
+        })}
+        {advA && (
+          <>
+            <div style={s.compareRow}>
+              <span style={{ color: '#64748b', fontSize: 12 }}>TS%</span>
+              <span style={{ fontWeight: 700, color: compareWin(advA.ts, other?.stats ? computeAdvanced(other.stats).ts : null) ? '#22c55e' : '#e2e8f0' }}>
+                {advA.ts != null ? `${advA.ts.toFixed(1)}%` : '—'}
+              </span>
+            </div>
+            <div style={s.compareRow}>
+              <span style={{ color: '#64748b', fontSize: 12 }}>eFG%</span>
+              <span style={{ fontWeight: 700, color: compareWin(advA.efg, other?.stats ? computeAdvanced(other.stats).efg : null) ? '#22c55e' : '#e2e8f0' }}>
+                {advA.efg != null ? `${advA.efg.toFixed(1)}%` : '—'}
+              </span>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function compareWin(a, b) {
+  return a != null && b != null && a > b;
+}
+
 const Toggle = ({ label, value, onChange, options }) => (
   <div style={s.toggleGroup}>
     <span style={s.toggleLabel}>{label}</span>
@@ -426,12 +684,30 @@ const s = {
   toggleBtnActive: { background: '#a855f7', color: '#fff' },
 
   resultsGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 12, maxWidth: 900, margin: '0 auto' },
-  playerTile: { padding: 14, background: '#1e293b', borderRadius: 10, border: '1px solid #334155', cursor: 'pointer', textAlign: 'center', color: '#e2e8f0' },
+  playerTileWrap: { position: 'relative' },
+  playerTile: { width: '100%', padding: 14, background: '#1e293b', borderRadius: 10, border: '1px solid #334155', cursor: 'pointer', textAlign: 'center', color: '#e2e8f0' },
   tileLogo: { width: 28, height: 28, objectFit: 'contain', marginBottom: 4 },
   tileRating: { background: '#a855f7', color: '#fff', borderRadius: '50%', width: 44, height: 44, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 18, marginBottom: 8 },
   tileName: { fontWeight: 700, fontSize: 14 },
   tileMeta: { color: '#94a3b8', fontSize: 11, marginTop: 4 },
   tilePpg: { color: '#fbbf24', fontSize: 12, marginTop: 4, fontWeight: 700 },
+  tileStar: { position: 'absolute', top: 6, right: 6, width: 28, height: 28, borderRadius: '50%', border: 'none', background: '#0f172a', color: '#64748b', cursor: 'pointer', fontSize: 16, display: 'flex', alignItems: 'center', justifyContent: 'center' },
+  tileStarOn: { background: '#fbbf24', color: '#0f172a' },
+
+  tabsRow: { display: 'flex', justifyContent: 'center', gap: 4, marginBottom: 16, background: '#0f172a', padding: 4, borderRadius: 10, maxWidth: 280, marginLeft: 'auto', marginRight: 'auto' },
+  tabBtn: { flex: 1, padding: '8px 16px', borderRadius: 8, border: 'none', background: 'transparent', color: '#94a3b8', cursor: 'pointer', fontWeight: 600, fontSize: 13 },
+  tabBtnActive: { background: '#a855f7', color: '#fff' },
+
+  starBtn: { padding: '6px 12px', borderRadius: 8, border: '1px solid #334155', background: '#0f172a', color: '#cbd5e1', cursor: 'pointer', fontSize: 12, fontWeight: 700 },
+  starBtnOn: { background: '#fbbf24', color: '#0f172a', borderColor: '#fbbf24' },
+
+  compareWrap: { display: 'grid', gridTemplateColumns: '1fr auto 1fr', gap: 16, alignItems: 'start', maxWidth: 900, margin: '0 auto' },
+  compareCol: { background: '#1e293b', borderRadius: 10, padding: 16, border: '1px solid #334155' },
+  compareVs: { color: '#a855f7', fontSize: 18, fontWeight: 800, padding: '20px 4px' },
+  compareSearchItem: { textAlign: 'left', padding: '8px 10px', borderRadius: 6, border: '1px solid #334155', background: '#0f172a', color: '#e2e8f0', cursor: 'pointer' },
+  compareCard: { color: '#e2e8f0' },
+  compareClear: { background: 'transparent', border: 'none', color: '#94a3b8', fontSize: 22, cursor: 'pointer', padding: 0, lineHeight: 1 },
+  compareRow: { display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid #334155' },
 
   bioCard: { maxWidth: 820, margin: '0 auto', background: '#1e293b', borderRadius: 16, padding: 24 },
   bioBack: { background: 'none', border: 'none', color: '#a855f7', cursor: 'pointer', fontSize: 13, fontWeight: 600, marginBottom: 16, display: 'block' },

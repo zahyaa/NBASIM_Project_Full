@@ -10,6 +10,20 @@ const playerSlotSchema = new mongoose.Schema({
   stats: Object,
 }, { _id: false });
 
+// Favorited NBA player (Players Bio "star" feature). Stored as a snapshot
+// so the favorites list still renders names/ratings even if the upstream
+// NBA API is briefly unreachable. Refreshed when the user opens the bio.
+const favoritePlayerSchema = new mongoose.Schema({
+  playerId: { type: Number, required: true },
+  firstName: String,
+  lastName: String,
+  position: String,
+  team: String,
+  teamLogo: String,
+  rating: Number,
+  addedAt: { type: Date, default: Date.now },
+}, { _id: false });
+
 const userSchema = new mongoose.Schema({
   username: { type: String, required: true, unique: true, trim: true, minlength: 3 },
   password: { type: String, required: true, minlength: 6 },
@@ -42,6 +56,9 @@ const userSchema = new mongoose.Schema({
 
   // Settings
   difficulty: { type: String, default: 'pro', enum: ['easy', 'hard', 'pro', 'allstar', 'legacy'] },
+
+  // Favorited NBA players from the Players Bio page
+  favoritePlayers: { type: [favoritePlayerSchema], default: [] },
 
   createdAt: { type: Date, default: Date.now },
 });
