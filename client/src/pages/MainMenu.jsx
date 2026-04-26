@@ -68,7 +68,7 @@ export default function MainMenu() {
   return (
     <div style={styles.container}>
       <div style={styles.header}>
-        <h1 style={styles.title}>NBA SIM</h1>
+        <h1 style={styles.title}>BASKETBALL SIMULATOR</h1>
         <p style={styles.tagline}>Live NBA roster. Your rules.</p>
         <p style={styles.subtitle}>Welcome, {user?.username}. Choose your game mode.</p>
         {user?.draftCompleted && (

@@ -103,6 +103,7 @@ export default function SettingsPage() {
 
   return (
     <div style={s.container}>
+      <div style={s.inner}>
       <button onClick={() => navigate('/menu')} style={s.backBtn}>&larr; Main Menu</button>
       <h1 style={s.title}>Settings</h1>
       {error && <div style={s.error}>{error}</div>}
@@ -176,12 +177,14 @@ export default function SettingsPage() {
       <div style={{ textAlign: 'center', marginTop: 24 }}>
         <button onClick={logout} style={s.logoutBtn}>Log Out</button>
       </div>
+      </div>
     </div>
   );
 }
 
 const s = {
-  container: { minHeight: '100vh', background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)', color: '#e2e8f0', padding: 24, maxWidth: 600, margin: '0 auto' },
+  container: { minHeight: '100vh', background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)', color: '#e2e8f0', padding: 24 },
+  inner: { maxWidth: 600, margin: '0 auto' },
   backBtn: { background: 'none', border: 'none', color: '#60a5fa', cursor: 'pointer', fontSize: 14, fontWeight: 600, marginBottom: 12, display: 'block' },
   title: { color: '#94a3b8', fontSize: 32, textAlign: 'center', margin: '0 0 24px', fontWeight: 800 },
   error: { background: '#7f1d1d', color: '#fca5a5', padding: '8px 12px', borderRadius: 8, textAlign: 'center', fontSize: 13, marginBottom: 12 },

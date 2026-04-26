@@ -7,8 +7,8 @@ A full-stack NBA basketball simulator with multiple game modes, built with the M
 - **🏆 Fantasy Draft** – Draft players from all NBA eras. Pick your city, coach, conference, and build your dream team of up to 12 players. Compete against CPU-generated opponents in full simulated games.
 - **📅 Season Draft** – Draft from current-season NBA rosters for the 2025-26 season with active coaches.
 - **⚡ One on One** – Pick any two NBA players and run a 1v1 game to 21 with full play-by-play.
-- **🔥 Blacktop** – Streetball mode. Choose 1v1 up to 5v5, set a target score (11, 15, or 21), and play half-court.
-- **📊 Players Bio** – Search any NBA player (active or retired) and view their full profile, stats, and ratings.
+- **🔥 Blacktop** – Streetball mode. Choose 1v1 up to 5v5, set a target score (11, 15, or 21), and play half-court. Simulate instantly or watch play-by-play.
+- **📊 Players Bio** – Search any active NBA player with debounced auto-complete. View real headshots, current-season averages, advanced stats (TS%, eFG%, AST/TO), career history (last 5 seasons), and the last 10 game logs. Star players to favorite them, and use **Compare** mode to put two players side-by-side with the better stat highlighted in green.
 - **🌐 Multiplayer** – Online head-to-head (coming soon).
 - **⚙️ Settings** – Difficulty levels (Easy, Hard, Pro, All-Star, Legacy), reset game data, manage account.
 
@@ -18,8 +18,10 @@ A full-stack NBA basketball simulator with multiple game modes, built with the M
 - 🧠 **Player Ratings** – Heuristic ratings based on draft position and experience
 - 🎮 **Game Simulation** – Full 4-quarter + overtime engine with weighted scoring, rebounds, assists, turnovers
 - 📺 **Animated GameCast** – Live play-by-play with scoreboard and speed controls (Slow/Normal/Fast/Turbo)
-- 🔍 **Player Search** – Search any NBA player across all eras via the balldontlie API
-- 💾 **Persistent Progress** – Wins, losses, teams, and settings stored in MongoDB
+- 🔍 **Player Search** – Search any active NBA player via the balldontlie API, with multi-token name matching (e.g. "Stephen Curry")
+- 🖼️ **Real Player Headshots** – ESPN search resolves player images on demand and caches them server-side for 24h
+- ⭐ **Favorites** – Star up to 50 players from the Bio page; pinned at the top of search results across sessions
+- 💾 **Persistent Progress** – Wins, losses, teams, favorites, and settings stored in MongoDB
 
 ## 🚀 Tech Stack
 
@@ -41,10 +43,15 @@ project-root/
 │   │   └── components/         # GameCast
 │   └── public/
 ├── server/                     # Express backend
-│   ├── models/                 # User, Game schemas
-│   ├── routes/                 # auth, draft, nba, simulate, games, settings
-│   ├── services/               # playerRating, simulation (5v5, 1v1, blacktop)
+│   ├── models/                 # User (incl. favoritePlayers), Game schemas
+│   ├── routes/                 # auth (incl. /favorites), draft, nba (incl.
+│   │                           # /players/:id/games), simulate, games, settings, upload
+│   ├── services/               # playerRating, playerPhoto (ESPN headshot
+│   │                           # resolver w/ 24h cache), nbaImages (team logos),
+│   │                           # simulation (5v5, 1v1, blacktop)
 │   └── middleware/             # JWT auth middleware
+├── e2e/                        # Playwright end-to-end tests
+├── render.yaml                 # Single-service Render Blueprint
 └── README.md
 ```
 
@@ -104,6 +111,9 @@ Visit [http://localhost:3000](http://localhost:3000)
 | POST | `/api/auth/register` | Create account |
 | POST | `/api/auth/login` | Login |
 | GET | `/api/auth/me` | Get current user (protected) |
+| GET | `/api/auth/favorites` | List favorited NBA players |
+| POST | `/api/auth/favorites` | Add or refresh a favorite |
+| DELETE | `/api/auth/favorites/:playerId` | Remove a favorite |
 
 ### Draft
 | Method | Route | Description |
@@ -117,8 +127,9 @@ Visit [http://localhost:3000](http://localhost:3000)
 | Method | Route | Description |
 |--------|-------|-------------|
 | GET | `/api/nba/teams` | All NBA teams |
-| GET | `/api/nba/players/search?q=` | Search players by name |
-| GET | `/api/nba/players/:id/bio` | Full player profile + season averages |
+| GET | `/api/nba/players/search?q=` | Search players by name (multi-token, post-filtered) |
+| GET | `/api/nba/players/:id/bio` | Full profile, current season + 5-year history, ESPN headshot |
+| GET | `/api/nba/players/:id/games?limit=10` | Recent regular-season game log |
 | GET | `/api/nba/roster` | Team roster with ratings |
 
 ### Simulation
