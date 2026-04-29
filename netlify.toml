@@ -1,0 +1,15 @@
+[build]
+  base    = "client"
+  command = "CI=false NODE_OPTIONS=--openssl-legacy-provider npm run build"
+  publish = "client/build"
+
+[build.environment]
+  # Override on Netlify dashboard (Site settings > Environment) per environment.
+  # CRA bakes REACT_APP_* into the bundle at build time.
+  NODE_VERSION = "18"
+
+# SPA fallback: every unknown path returns index.html so React Router handles it.
+[[redirects]]
+  from   = "/*"
+  to     = "/index.html"
+  status = 200

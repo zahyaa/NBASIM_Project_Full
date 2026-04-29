@@ -1,0 +1,49 @@
+# /etc/systemd/system/nbasim-api.service
+# Run the Node API as a non-login system user under systemd.
+#
+# Setup (run once on the Ubuntu host):
+#   sudo useradd --system --home /srv/nbasim --shell /usr/sbin/nologin nbasim
+#   sudo mkdir -p /srv/nbasim && sudo chown nbasim:nbasim /srv/nbasim
+#   sudo -u nbasim git clone https://github.com/zahyaa/NBASIM_Project_Full.git /srv/nbasim/app
+#   sudo -u nbasim bash -lc 'cd /srv/nbasim/app/server && npm ci --omit=dev'
+#   sudo install -m 600 -o nbasim -g nbasim deploy/nbasim.env.example /srv/nbasim/nbasim.env
+#   # edit /srv/nbasim/nbasim.env with real secrets
+#   sudo cp deploy/nbasim-api.service /etc/systemd/system/nbasim-api.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now nbasim-api
+#   sudo journalctl -u nbasim-api -f
+
+[Unit]
+Description=NBASIM API (Node.js)
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=nbasim
+Group=nbasim
+WorkingDirectory=/srv/nbasim/app/server
+EnvironmentFile=/srv/nbasim/nbasim.env
+Environment=NODE_ENV=production
+Environment=PORT=5001
+ExecStart=/usr/bin/node server.js
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+# Hardening — drop ambient privileges and confine the process.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/srv/nbasim/app/server/uploads
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+
+[Install]
+WantedBy=multi-user.target

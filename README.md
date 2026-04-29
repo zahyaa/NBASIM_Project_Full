@@ -71,7 +71,8 @@ project-root/
 │   │                           # news, fantasyGM achievements
 │   └── middleware/             # JWT auth middleware
 ├── e2e/                        # Playwright end-to-end tests
-├── render.yaml                 # Single-service Render Blueprint
+├── netlify.toml                # Netlify build + SPA fallback (frontend host)
+├── deploy/                     # Ubuntu API host: nginx, systemd, deploy guide
 └── README.md
 ```
 
@@ -254,32 +255,42 @@ Browser-driven tests exercising the real React app against the real Express serv
 
 ---
 
-## � Deploy (single service)
+## 🚀 Deploy (Netlify frontend + Ubuntu API)
 
-This app ships as **one Web Service** on [Render](https://render.com): Express handles `/api/*` and serves the built React app for everything else. Frontend + backend live behind one domain — no separate static host, no CORS gymnastics.
+Frontend is a static React build served by **Netlify**. Backend is a Node/Express API on an **Ubuntu** host behind Nginx + Let's Encrypt. They communicate cross-origin over HTTPS.
+
+```
+Browser → https://bballsim.app           (Netlify, static React build)
+        → https://api.bballsim.app/api/* (Nginx → Node :5001 → MongoDB Atlas)
+```
 
 ### Prerequisites
-- A free **MongoDB Atlas** cluster — copy its connection string
-- A **balldontlie** API key
-- A long random **JWT_SECRET** (`openssl rand -hex 64`)
+- A **MongoDB Atlas** cluster (or a local Mongo on the Ubuntu host)
+- A **balldontlie** API key (optional)
+- A long random **JWT_SECRET** (`openssl rand -hex 32`)
+- A domain you control (DNS access)
 
-### Steps
+### Frontend (Netlify)
 1. Push this repo to GitHub.
-2. On Render: **New → Blueprint → connect this repo**. The included [render.yaml](render.yaml) wires up build + start commands automatically.
-3. In the Render dashboard set these env vars (the blueprint marks them `sync: false` so they aren't committed):
-   - `JWT_SECRET`
-   - `BALLDONTLIE_API_KEY`
-   - `MONGODB_URI` — Atlas SRV string
-   - `CORS_ORIGIN` — your service URL, e.g. `https://nbasim.onrender.com`
-4. In Atlas, allow Render's egress IPs (or `0.0.0.0/0` for the free tier).
-5. Render runs:
-   ```bash
-   npm install && npm run build      # builds client/build/
-   npm start                          # node server/server.js
-   ```
-6. Visit your Render URL — the React app and API are both served from it.
+2. Netlify → **Add new site → Import from Git**. Build settings auto-load from [netlify.toml](netlify.toml).
+3. Set env var `REACT_APP_API_URL=https://api.bballsim.app` in the Netlify dashboard.
+4. Add your custom domain and let Netlify provision TLS.
 
-The same setup works on **Railway** or **Fly.io** with the same `npm run build` / `npm start` scripts. For a custom domain, point CNAME → your Render hostname and update `CORS_ORIGIN`.
+### Backend (Ubuntu)
+Full walkthrough lives in [deploy/README.md](deploy/README.md). High level:
+```bash
+sudo apt install -y nginx nodejs git
+sudo useradd --system --home /srv/nbasim --shell /usr/sbin/nologin nbasim
+sudo -u nbasim git clone <repo> /srv/nbasim/app
+sudo -u nbasim bash -lc 'cd /srv/nbasim/app/server && npm ci --omit=dev'
+sudo install -m 600 -o nbasim -g nbasim deploy/nbasim.env.example /srv/nbasim/nbasim.env  # edit secrets
+sudo cp deploy/nbasim-api.service /etc/systemd/system/ && sudo systemctl enable --now nbasim-api
+sudo cp deploy/nginx-nbasim.conf /etc/nginx/sites-available/ && sudo ln -s ../sites-available/nbasim-api.conf /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+sudo certbot --nginx -d api.bballsim.app
+```
+
+Make sure `CORS_ORIGIN=https://bballsim.app` is set in `/srv/nbasim/nbasim.env` so the Ubuntu API accepts requests from Netlify.
 
 ---
 
