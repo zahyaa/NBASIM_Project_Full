@@ -60,6 +60,13 @@ const draftRoutes = require('./routes/draft');
 const simulateRoutes = require('./routes/simulate');
 const settingsRoutes = require('./routes/settings');
 const uploadRoutes = require('./routes/upload');
+const storeRoutes = require('./routes/store');
+const teamRoutes = require('./routes/team');
+const seasonRoutes = require('./routes/season');
+const playoffsRoutes = require('./routes/playoffs');
+const newsRoutes = require('./routes/news');
+const allstarRoutes = require('./routes/allstar');
+const paymentsRoutes = require('./routes/payments');
 
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -81,6 +88,13 @@ app.use('/api/draft', draftRoutes);
 app.use('/api/simulate', simulateRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/upload', uploadRoutes);
+app.use('/api/store', storeRoutes);
+app.use('/api/team', teamRoutes);
+app.use('/api/season', seasonRoutes);
+app.use('/api/playoffs', playoffsRoutes);
+app.use('/api/news', newsRoutes);
+app.use('/api/allstar', allstarRoutes);
+app.use('/api/payments', paymentsRoutes);
 
 // In production (single-service deploy), serve the built React app from this
 // same Express server so frontend and backend ship together. The build is

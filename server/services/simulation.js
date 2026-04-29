@@ -4,6 +4,7 @@
  */
 
 function pickWeightedPlayer(players) {
+  if (!players || players.length === 0) return null;
   const total = players.reduce((sum, p) => sum + (p.rating || 50), 0);
   let r = Math.random() * total;
   for (const p of players) {
@@ -83,6 +84,7 @@ function simulateGame(teamA, teamB) {
 
       const active = roster.slice(0, 5);
       const player = pickWeightedPlayer(active);
+      if (!player) continue;
       const pBox = box[player.playerId];
       pBox.min += Math.round(elapsed / 60 * 10) / 10;
 
@@ -242,6 +244,7 @@ function simulateGame(teamA, teamB) {
 
       const active = roster.slice(0, 5);
       const player = pickWeightedPlayer(active);
+      if (!player) continue;
       const pBox = box[player.playerId];
 
       const shotChance = 0.35 + (player.rating / 99) * 0.25;

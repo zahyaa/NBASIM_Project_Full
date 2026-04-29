@@ -12,7 +12,7 @@ test('register, land on menu, logout', async ({ page, user }) => {
   // Lands on main menu
   await expect(page).toHaveURL(/\/menu/);
   await expect(page.getByText(`Welcome, ${user.username}`)).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'NBA SIM' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'BASKETBALL SIMULATOR' })).toBeVisible();
 
   // Logout returns to login screen
   await page.getByRole('button', { name: 'Logout' }).click();

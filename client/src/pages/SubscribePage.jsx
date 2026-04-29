@@ -1,0 +1,184 @@
+// Subscription + token bundle store. PayPal-first checkout with a credit
+// card fallback. Card numbers are NEVER stored — server keeps last4 only.
+import React, { useEffect, useState, useCallback } from 'react';
+import { useAuth } from '../context/AuthContext';
+import { useNavigate } from 'react-router-dom';
+
+export default function SubscribePage() {
+  const { token, user, setUser } = useAuth();
+  const navigate = useNavigate();
+  const [catalog, setCatalog] = useState({ bundles: [], plans: [], paypalEnabled: false });
+  const [tab, setTab] = useState('tokens');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [info, setInfo] = useState('');
+  const [method, setMethod] = useState('paypal');
+  const [card, setCard] = useState({ number: '', expMonth: '', expYear: '', cvc: '', name: '' });
+
+  const load = useCallback(async () => {
+    try {
+      const res = await fetch('/api/payments/catalog', { headers: { Authorization: `Bearer ${token}` } });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setCatalog(data);
+      if (!data.paypalEnabled) setMethod('credit-card');
+    } catch (err) { setError(err.message); }
+  }, [token]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const refreshUser = async () => {
+    const r = await fetch('/api/auth/me', { headers: { Authorization: `Bearer ${token}` } });
+    setUser(await r.json());
+  };
+
+  // PayPal flow: create order → redirect/approve → capture. In sandbox the
+  // server returns no approveUrl so we capture immediately for the demo.
+  async function buyPaypal({ kind, bundleId, tier }) {
+    setBusy(true); setError(''); setInfo('');
+    try {
+      const create = await fetch('/api/payments/paypal/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ kind, bundleId, tier }),
+      }).then(r => r.json());
+      if (create.error) throw new Error(create.error);
+      // In a real production flow, redirect to create.approveUrl and capture
+      // after the user returns. Here we capture directly (sandbox/dev).
+      const cap = await fetch('/api/payments/paypal/capture', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ orderId: create.orderId, kind, bundleId, tier }),
+      }).then(r => r.json());
+      if (cap.error) throw new Error(cap.error);
+      setInfo(cap.message + (cap.sandbox ? ' (sandbox)' : ''));
+      await refreshUser();
+    } catch (err) { setError(err.message); }
+    setBusy(false);
+  }
+
+  async function buyCard({ kind, bundleId, tier }) {
+    setBusy(true); setError(''); setInfo('');
+    try {
+      const res = await fetch('/api/payments/credit-card', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ kind, bundleId, tier, card }),
+      }).then(r => r.json());
+      if (res.error) throw new Error(res.error);
+      setInfo(`${res.message} (card ending ${res.last4})`);
+      setCard({ number: '', expMonth: '', expYear: '', cvc: '', name: '' });
+      await refreshUser();
+    } catch (err) { setError(err.message); }
+    setBusy(false);
+  }
+
+  const buy = (target) => method === 'paypal' ? buyPaypal(target) : buyCard(target);
+
+  const subActive = user?.subscription?.tier && user.subscription.tier !== 'free';
+
+  return (
+    <div style={s.container} data-testid="subscribe-page">
+      <button onClick={() => navigate('/menu')} style={s.backBtn}>&larr; Main Menu</button>
+      <div style={s.header}>
+        <h1 style={s.title}>💳 Tokens & Premium</h1>
+        <p style={s.subtitle}>Balance: <strong style={{ color: '#facc15' }}>{user?.tokens || 0}</strong> tokens</p>
+        {subActive && (
+          <p style={s.subBadge}>
+            ✨ {user.subscription.tier === 'gm-elite' ? 'GM Elite' : 'Premium GM'} active
+            {user.subscription.paidUntil && ` · until ${new Date(user.subscription.paidUntil).toLocaleDateString()}`}
+          </p>
+        )}
+      </div>
+
+      <div style={s.tabs}>
+        <button onClick={() => setTab('tokens')} style={{ ...s.tab, ...(tab === 'tokens' ? s.activeTab : {}) }}>Buy Tokens</button>
+        <button onClick={() => setTab('subscription')} style={{ ...s.tab, ...(tab === 'subscription' ? s.activeTab : {}) }}>Subscription</button>
+      </div>
+
+      <div style={s.methodRow}>
+        <label style={{ marginRight: 16 }}>Pay with:</label>
+        <button
+          onClick={() => setMethod('paypal')}
+          disabled={!catalog.paypalEnabled && false /* always allow stub */}
+          style={{ ...s.methodBtn, ...(method === 'paypal' ? s.activeMethod : {}) }}
+          data-testid="pay-paypal"
+        >
+          PayPal {!catalog.paypalEnabled && '(sandbox)'}
+        </button>
+        <button onClick={() => setMethod('credit-card')} style={{ ...s.methodBtn, ...(method === 'credit-card' ? s.activeMethod : {}) }} data-testid="pay-card">
+          Credit Card
+        </button>
+      </div>
+
+      {method === 'credit-card' && (
+        <div style={s.cardForm}>
+          <input placeholder="Card Number" value={card.number} onChange={e => setCard({ ...card, number: e.target.value })} style={s.input} />
+          <input placeholder="Name on card" value={card.name} onChange={e => setCard({ ...card, name: e.target.value })} style={s.input} />
+          <input placeholder="MM" maxLength={2} value={card.expMonth} onChange={e => setCard({ ...card, expMonth: e.target.value })} style={{ ...s.input, width: 60 }} />
+          <input placeholder="YYYY" maxLength={4} value={card.expYear} onChange={e => setCard({ ...card, expYear: e.target.value })} style={{ ...s.input, width: 80 }} />
+          <input placeholder="CVC" maxLength={4} value={card.cvc} onChange={e => setCard({ ...card, cvc: e.target.value })} style={{ ...s.input, width: 70 }} />
+          <small style={{ color: '#94a3b8', display: 'block', marginTop: 4 }}>
+            🔒 We never store your full card number — only the last 4 digits are kept for receipts.
+          </small>
+        </div>
+      )}
+
+      {error && <div style={s.error}>{error}</div>}
+      {info && <div style={s.info}>{info}</div>}
+
+      {tab === 'tokens' && (
+        <div style={s.grid}>
+          {catalog.bundles.map(b => (
+            <div key={b.bundleId} style={s.card}>
+              <h3 style={{ margin: 0, color: '#facc15' }}>{b.name}</h3>
+              <div style={s.tokenAmt}>{b.tokens.toLocaleString()} tokens</div>
+              <div style={s.price}>${b.priceUSD}</div>
+              <button onClick={() => buy({ kind: 'tokens', bundleId: b.bundleId })} disabled={busy} style={s.buyBtn}>Buy</button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {tab === 'subscription' && (
+        <div style={s.grid}>
+          {catalog.plans.map(p => (
+            <div key={p.tier} style={{ ...s.card, ...(p.tier === 'gm-elite' ? s.eliteCard : {}) }}>
+              <h3 style={{ margin: 0, color: p.tier === 'gm-elite' ? '#a855f7' : '#facc15' }}>{p.name}</h3>
+              <div style={s.price}>${p.priceUSD}/mo</div>
+              <ul style={{ paddingLeft: 18, fontSize: 13, color: '#cbd5e1' }}>
+                {p.perks.map((perk, i) => <li key={i}>{perk}</li>)}
+              </ul>
+              <button onClick={() => buy({ kind: 'subscription', tier: p.tier })} disabled={busy} style={s.buyBtn}>Subscribe</button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const s = {
+  container: { padding: 24, color: '#fff', minHeight: '100vh', background: '#0f172a' },
+  backBtn: { background: 'transparent', color: '#60a5fa', border: 'none', cursor: 'pointer', fontSize: 14, marginBottom: 16 },
+  header: { textAlign: 'center', marginBottom: 16 },
+  title: { fontSize: 28, marginBottom: 4 },
+  subtitle: { color: '#94a3b8' },
+  subBadge: { color: '#a855f7', fontWeight: 700, marginTop: 6 },
+  tabs: { display: 'flex', justifyContent: 'center', gap: 0, marginBottom: 16 },
+  tab: { padding: '8px 24px', background: '#1e293b', color: '#94a3b8', border: 'none', cursor: 'pointer', fontWeight: 600 },
+  activeTab: { background: '#f97316', color: '#fff' },
+  methodRow: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 12 },
+  methodBtn: { padding: '6px 14px', background: '#1e293b', color: '#94a3b8', border: '1px solid #334155', borderRadius: 4, cursor: 'pointer' },
+  activeMethod: { background: '#0070ba', color: '#fff', borderColor: '#0070ba' },
+  cardForm: { display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'center', maxWidth: 700, margin: '0 auto 16px', padding: 12, background: '#1e293b', borderRadius: 8 },
+  input: { padding: 8, background: '#0f172a', color: '#fff', border: '1px solid #334155', borderRadius: 4 },
+  error: { padding: 10, background: '#7f1d1d', borderRadius: 6, marginBottom: 16, textAlign: 'center', maxWidth: 700, margin: '0 auto 16px' },
+  info: { padding: 10, background: '#064e3b', borderRadius: 6, marginBottom: 16, textAlign: 'center', maxWidth: 700, margin: '0 auto 16px' },
+  grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12, maxWidth: 1100, margin: '0 auto' },
+  card: { background: '#1e293b', padding: 16, borderRadius: 8, textAlign: 'center', border: '1px solid #334155' },
+  eliteCard: { borderColor: '#a855f7', background: 'linear-gradient(135deg, #1e293b, #2e1065)' },
+  tokenAmt: { fontSize: 22, fontWeight: 700, margin: '8px 0' },
+  price: { fontSize: 18, color: '#10b981', marginBottom: 12 },
+  buyBtn: { padding: '8px 20px', background: '#f97316', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 700, width: '100%' },
+};
