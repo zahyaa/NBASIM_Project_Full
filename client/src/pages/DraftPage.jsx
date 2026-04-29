@@ -228,14 +228,16 @@ export default function DraftPage() {
   const lotteryPosition = user?.lotteryPosition || 0;
   const slotAssigned = lotteryPosition >= 1;
 
-  // Players the USER has already drafted. Other teams may share players —
-  // the differentiator is what each team buys at the Store — so we no
-  // longer cross-filter against CPU rosters.
+  // League-wide uniqueness: a player can only be on ONE roster across the
+  // user + all 29 CPU teams. The `pool` memo strips every drafted id so the
+  // live queue updates the instant a pick is made (user OR CPU). The server
+  // enforces the same rule and returns 409 if a duplicate slips through.
   const draftedIds = useMemo(() => {
     const s = new Set();
     roster.forEach(p => s.add(p.playerId));
+    (user?.cpuTeams || []).forEach(t => (t.players || []).forEach(p => s.add(p.playerId)));
     return s;
-  }, [roster]);
+  }, [roster, user?.cpuTeams]);
 
   const pool = useMemo(
     () => rawPool.filter(p => !draftedIds.has(p.id)),
@@ -416,9 +418,9 @@ export default function DraftPage() {
         },
         ...prev,
       ]);
-      // Cross-team duplicates are allowed — only filter the user's own
-      // roster (handled by the `pool` memo via draftedIds), so we leave
-      // rawPool intact here.
+      // League-wide uniqueness: refreshUser() pulls the user's roster +
+      // every CPU roster, the draftedIds memo recomputes from that, and the
+      // pool memo strips this player from the queue immediately.
       await refreshUser();
       setCurrentPickIdx(idx => idx + 1);
     } catch (err) {
@@ -457,8 +459,9 @@ export default function DraftPage() {
             },
             ...prev,
           ]);
-          // Cross-team duplicates are allowed — keep the player in rawPool
-          // so the user (and other CPU teams) can still draft them.
+          // League-wide uniqueness: refreshUser() now also includes the
+          // freshly-drafted CPU pick, so draftedIds + pool memos drop the
+          // player from every team's available queue on this same render.
           await refreshUser();
         }
       } catch (_e) { /* ignore individual CPU errors */ }
