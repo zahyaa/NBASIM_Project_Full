@@ -49,14 +49,14 @@ describe('fantasyGM helpers', () => {
     cpus.forEach(t => expect(isValidConferenceDivision(t.conference, t.division)).toBe(true));
   });
 
-  test('distributePlayersToCpuTeams gives every CPU team 15 unique players within their own roster', () => {
+  test('distributePlayersToCpuTeams gives every CPU team 15 league-wide-unique players', () => {
     const userTeam = {
       name: 'NY Royals', city: 'New York', coach: 'Tom Thibodeau',
       conference: 'East', division: 'Atlantic',
     };
     const cpus = generateCpuTeams({ userTeam });
-    // Build a fake pool — enough players for one team's 15 plus extras.
-    const pool = Array.from({ length: 60 }, (_, i) => ({
+    // 29 CPU teams × 15 picks = 435 needed. Provide 500-player pool.
+    const pool = Array.from({ length: 500 }, (_, i) => ({
       id: i + 1,
       firstName: `First${i}`,
       lastName: `Last${i}`,
@@ -66,13 +66,13 @@ describe('fantasyGM helpers', () => {
     }));
     distributePlayersToCpuTeams({ cpuTeams: cpus, pool });
 
+    const allClaimed = new Set();
     cpus.forEach(team => {
       expect(team.players).toHaveLength(15);
-      const own = new Set();
       team.players.forEach(p => {
-        // Per-team uniqueness only — duplicates ACROSS teams are allowed now.
-        expect(own.has(p.playerId)).toBe(false);
-        own.add(p.playerId);
+        // League-wide uniqueness — NO duplicates across any CPU teams.
+        expect(allClaimed.has(p.playerId)).toBe(false);
+        allClaimed.add(p.playerId);
       });
     });
   });
@@ -211,8 +211,8 @@ describe('Store purchase flow', () => {
   });
 });
 
-describe('Draft pick + cpu-fill no-duplicate guarantee', () => {
-  test('cpu-fill distributes 15 within-team-unique players per CPU (cross-team duplicates allowed)', async () => {
+describe('Draft pick + cpu-fill league-wide uniqueness', () => {
+  test('cpu-fill distributes 15 league-wide-unique players per CPU', async () => {
     const token = await registerAndLogin('no-dups');
     await setupDraft(token);
     // User drafts player 5.
@@ -220,8 +220,8 @@ describe('Draft pick + cpu-fill no-duplicate guarantee', () => {
       .set('Authorization', `Bearer ${token}`)
       .send({ playerId: 5, firstName: 'A', lastName: 'B', position: 'G', rating: 80 });
 
-    // Build a 60-player synthetic pool covering ids 1..60 (includes id 5).
-    const pool = Array.from({ length: 60 }, (_, i) => ({
+    // 29 CPU teams × 15 picks + user's 1 = 436 needed. Provide 500.
+    const pool = Array.from({ length: 500 }, (_, i) => ({
       id: i + 1, firstName: `F${i}`, lastName: `L${i}`, position: 'G', rating: 60 + (i % 30), stats: null,
     }));
     const fill = await request(app).post('/api/draft/cpu-fill')
@@ -230,20 +230,22 @@ describe('Draft pick + cpu-fill no-duplicate guarantee', () => {
     expect(fill.status).toBe(200);
 
     const me = await request(app).get('/api/auth/me').set('Authorization', `Bearer ${token}`);
+    const allClaimed = new Set([5]); // user owns id 5
     me.body.cpuTeams.forEach(t => {
       expect(t.players).toHaveLength(15);
-      const own = new Set();
       t.players.forEach(p => {
-        expect(own.has(p.playerId)).toBe(false); // unique within this team
-        own.add(p.playerId);
+        // League-wide uniqueness — no player on more than one roster, and
+        // none can match the user's pick (id 5).
+        expect(allClaimed.has(p.playerId)).toBe(false);
+        allClaimed.add(p.playerId);
       });
     });
   });
 
-  test('user CAN draft a player a CPU already owns (cross-team duplicates allowed)', async () => {
+  test('user CANNOT draft a player a CPU already owns (league-wide uniqueness)', async () => {
     const token = await registerAndLogin('dup-pick');
     await setupDraft(token);
-    const pool = Array.from({ length: 60 }, (_, i) => ({
+    const pool = Array.from({ length: 500 }, (_, i) => ({
       id: i + 1, firstName: `F${i}`, lastName: `L${i}`, position: 'G', rating: 60 + (i % 30), stats: null,
     }));
     await request(app).post('/api/draft/cpu-fill')
@@ -255,8 +257,9 @@ describe('Draft pick + cpu-fill no-duplicate guarantee', () => {
     const res = await request(app).post('/api/draft/pick')
       .set('Authorization', `Bearer ${token}`)
       .send({ playerId: cpuOwnedId, firstName: 'X', lastName: 'Y', position: 'G', rating: 80 });
-    expect(res.status).toBe(200);
-    expect(res.body.team.players.some(p => p.playerId === cpuOwnedId)).toBe(true);
+    // Server rejects with 409 Conflict so the client can refetch /pool.
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/Already drafted by/);
   });
 });
 

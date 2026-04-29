@@ -16,6 +16,7 @@ const {
 } = require('../services/playoffs');
 const { pushNews } = require('../services/news');
 const { awardRewards } = require('../services/fantasyGM');
+const { ensureRookieClassFor } = require('../services/rookieClass');
 
 const router = express.Router();
 
@@ -146,6 +147,17 @@ router.post('/play-next', auth, async (req, res) => {
         body: `${finals.winner} defeat ${user.playoffs.runnerUp} ${finals.winsA > finals.winsB ? finals.winsA : finals.winsB}-${Math.min(finals.winsA, finals.winsB)} in the Finals.`,
         seasonNumber: user.seasonNumber,
       });
+      // Season is officially over — generate next year's rookie class so
+      // it shows up in the draft pool when the user advances to a new draft.
+      const nextDraftYear = (user.season || new Date().getFullYear()) + 1;
+      ensureRookieClassFor(user, nextDraftYear);
+      user.markModified('rookieClass');
+      pushNews(user, {
+        id: `rookie_class_${nextDraftYear}`, kind: 'system',
+        headline: `🎓 ${nextDraftYear} Rookie Class declared`,
+        body: `60 prospects from across the world have entered the ${nextDraftYear} NBA Draft pool.`,
+        seasonNumber: user.seasonNumber,
+      });
     }
     user.markModified('playoffs');
 
@@ -187,6 +199,15 @@ router.post('/simulate-all', auth, async (req, res) => {
         id: `po_champ_${Date.now()}`, kind: 'system',
         headline: `🏆 ${finals.winner} are NBA Champions!`,
         body: `${finals.winner} cap a championship run, defeating ${user.playoffs.runnerUp}.`,
+        seasonNumber: user.seasonNumber,
+      });
+      const nextDraftYear = (user.season || new Date().getFullYear()) + 1;
+      ensureRookieClassFor(user, nextDraftYear);
+      user.markModified('rookieClass');
+      pushNews(user, {
+        id: `rookie_class_${nextDraftYear}`, kind: 'system',
+        headline: `🎓 ${nextDraftYear} Rookie Class declared`,
+        body: `60 prospects have entered the ${nextDraftYear} NBA Draft pool.`,
         seasonNumber: user.seasonNumber,
       });
     }

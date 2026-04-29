@@ -12,6 +12,7 @@ const {
   shuffle,
   awardRewards,
 } = require('../services/fantasyGM');
+const { ensureRookieClassFor } = require('../services/rookieClass');
 const router = express.Router();
 
 const STARTING_TOKENS = 500;
@@ -191,7 +192,35 @@ router.get('/pool', auth, async (req, res) => {
         };
       });
 
-    const pool = [...nbaPool, ...generateDLeaguePool()]
+    // Rookies: shaped like NBA pool entries so the existing UI just works.
+    const user = await User.findById(req.userId);
+    const rookiePool = (user?.rookieClass || []).map(r => ({
+      id: r.playerId,
+      firstName: r.firstName,
+      lastName: r.lastName,
+      position: r.position,
+      team: `${r.school} (R)`,            // "(R)" tag flags rookies in the UI
+      league: 'Rookie',
+      rating: r.rating,
+      stats: null,
+      isRookie: true,
+      school: r.school,
+      country: r.country,
+      heightIn: r.heightIn,
+      weightLb: r.weightLb,
+      draftYear: r.draftYear,
+    }));
+
+    // Teams cannot draft the same player — strip anyone already on the
+    // user's roster or any CPU team's roster from the pool.
+    const drafted = new Set();
+    if (user) {
+      (user.team?.players || []).forEach(p => drafted.add(p.playerId));
+      (user.cpuTeams || []).forEach(t => (t.players || []).forEach(p => drafted.add(p.playerId)));
+    }
+
+    const pool = [...nbaPool, ...generateDLeaguePool(), ...rookiePool]
+      .filter(p => !drafted.has(p.id))
       .sort((a, b) => b.rating - a.rating);
 
     res.json(pool);
@@ -201,9 +230,9 @@ router.get('/pool', auth, async (req, res) => {
 });
 
 // POST /api/draft/pick — user drafts a player.
-// Teams may now draft the SAME player as another team — the differentiator
-// is what each team buys at the Store. We only block duplicates within the
-// user's own 15-player roster.
+// League-wide uniqueness: a player can only be on ONE roster across the
+// user's team + all CPU teams. The /pool endpoint also strips already-drafted
+// players, so this is the authoritative server-side check on race conditions.
 router.post('/pick', auth, async (req, res) => {
   try {
     const { playerId, firstName, lastName, position, rating, stats } = req.body;
@@ -222,11 +251,15 @@ router.post('/pick', auth, async (req, res) => {
       return res.status(400).json({ error: 'Roster full (15 players max)' });
     }
 
-    // Per-team uniqueness only — the user can't draft the same player twice
-    // onto their own roster, but other teams may also have that player.
-    const owned = new Set(user.team.players.map(p => p.playerId));
-    if (owned.has(playerId)) {
-      return res.status(400).json({ error: 'Already on your roster' });
+    // League-wide uniqueness — reject if anyone (user or any CPU team)
+    // already owns this player. Returns 409 so the client can refetch /pool.
+    if ((user.team.players || []).some(p => p.playerId === playerId)) {
+      return res.status(409).json({ error: 'Already on your roster' });
+    }
+    for (const cpu of user.cpuTeams || []) {
+      if ((cpu.players || []).some(p => p.playerId === playerId)) {
+        return res.status(409).json({ error: `Already drafted by ${cpu.name}` });
+      }
     }
 
     user.team.players.push({ playerId, firstName, lastName, position, rating, stats });
@@ -268,12 +301,16 @@ router.post('/cpu-pick', auth, async (req, res) => {
     if (!cpu) return res.status(404).json({ error: 'CPU team not found' });
     if (cpu.players.length >= 15) return res.status(400).json({ error: 'CPU roster already full' });
 
-    // Per-team uniqueness only: the same player CAN appear on multiple teams.
-    const owned = new Set(cpu.players.map(p => p.playerId));
+    // League-wide uniqueness: a player can only land on one roster across
+    // the user's team + every CPU team. Build the set fresh so we never
+    // assign a player who was just taken in a parallel pick.
+    const drafted = new Set();
+    (user.team?.players || []).forEach(p => drafted.add(p.playerId));
+    user.cpuTeams.forEach(t => (t.players || []).forEach(p => drafted.add(p.playerId)));
 
     // CPU prefers higher-rated available players, with mild noise so the
     // top of the pool isn't picked perfectly in order every time.
-    const available = pool.filter(p => !owned.has(p.id));
+    const available = pool.filter(p => !drafted.has(p.id));
     if (!available.length) return res.status(400).json({ error: 'Pool exhausted' });
     const top = available
       .slice()
@@ -310,10 +347,13 @@ router.post('/cpu-fill', auth, async (req, res) => {
     const pool = Array.isArray(req.body?.pool) ? req.body.pool : [];
     if (pool.length === 0) return res.status(400).json({ error: 'pool[] is required' });
 
-    // Each CPU team draws independently — duplicates across teams are now allowed.
+    // League-wide uniqueness: exclude the user's roster ids so a CPU can't
+    // claim a player the user already drafted.
+    const userIds = (user.team?.players || []).map(p => p.playerId);
     distributePlayersToCpuTeams({
       cpuTeams: user.cpuTeams,
       pool,
+      excludeIds: userIds,
     });
     user.markModified('cpuTeams');
     await user.save();
@@ -356,8 +396,14 @@ router.post('/sim-all', auth, async (req, res) => {
       });
     }
 
-    // Fill every CPU roster from the same pool (per-team uniqueness only).
-    distributePlayersToCpuTeams({ cpuTeams: user.cpuTeams, pool });
+    // Fill every CPU roster from the same pool with league-wide uniqueness:
+    // the user's roster is excluded so CPUs can't double-pick a player the
+    // assistant GM just took.
+    distributePlayersToCpuTeams({
+      cpuTeams: user.cpuTeams,
+      pool,
+      excludeIds: Array.from(ownedByUser),
+    });
     user.markModified('cpuTeams');
 
     user.draftCompleted = true;
@@ -389,6 +435,11 @@ router.post('/complete', auth, async (req, res) => {
 
     if (teamName) user.team.name = String(teamName).slice(0, 50);
     user.draftCompleted = true;
+    // Rookie class has been merged into the pool and any selected rookies
+    // now sit on rosters. Clear it so future season-end logic can generate
+    // a fresh class for next year.
+    user.rookieClass = [];
+    user.rookieClassYear = 0;
     await user.save();
     res.json({ message: 'Draft completed', team: user.team });
   } catch (err) {

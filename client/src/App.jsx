@@ -15,6 +15,7 @@ import TeamManagementPage from './pages/TeamManagementPage';
 import StandingsPage from './pages/StandingsPage';
 import PlayoffsPage from './pages/PlayoffsPage';
 import PlaybookPage from './pages/PlaybookPage';
+import DefensivePlaybookPage from './pages/DefensivePlaybookPage';
 import HowToPlayPage from './pages/HowToPlayPage';
 import HomeLogo from './components/HomeLogo';
 import NewsPage from './pages/NewsPage';
@@ -88,6 +89,7 @@ function AppRoutes() {
         <Route path="/store" element={<ProtectedRoute><DraftStartedGate><StorePage /></DraftStartedGate></ProtectedRoute>} />
         <Route path="/team" element={<ProtectedRoute><DraftStartedGate><TeamManagementPage /></DraftStartedGate></ProtectedRoute>} />
         <Route path="/playbook" element={<ProtectedRoute><DraftStartedGate><PlaybookPage /></DraftStartedGate></ProtectedRoute>} />
+        <Route path="/defensive-playbook" element={<ProtectedRoute><DraftStartedGate><DefensivePlaybookPage /></DraftStartedGate></ProtectedRoute>} />
         <Route path="/game" element={<ProtectedRoute><DraftGate><GamePage /></DraftGate></ProtectedRoute>} />
         <Route path="/standings" element={<ProtectedRoute><DraftGate><StandingsPage /></DraftGate></ProtectedRoute>} />
         <Route path="/playoffs" element={<ProtectedRoute><DraftGate><PlayoffsPage /></DraftGate></ProtectedRoute>} />

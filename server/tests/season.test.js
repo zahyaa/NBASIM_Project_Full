@@ -232,7 +232,7 @@ describe('Live "on the clock" CPU draft pick', () => {
     expect(cpu.players[0].playerId).toBe(res.body.pick.id);
   });
 
-  test('cpu-pick MAY pick the same player as the user (cross-team duplicates allowed)', async () => {
+  test('cpu-pick CANNOT pick the same player the user already owns (league-wide uniqueness)', async () => {
     const token = await registerAndLogin('live-draft-nodup');
     await request(app).post('/api/draft/setup')
       .set('Authorization', `Bearer ${token}`)
@@ -247,16 +247,16 @@ describe('Live "on the clock" CPU draft pick', () => {
 
     const me = await request(app).get('/api/auth/me').set('Authorization', `Bearer ${token}`);
     const cpuName = me.body.cpuTeams[0].name;
-    // Pool offers exactly one player. The CPU should pick it even though
-    // the user already owns the same player (duplicates across teams are
-    // intentional under the new rules — differentiation comes from the Store).
+    // Pool contains the user's player + an alternative. CPU must skip 8001
+    // and pick 8002 instead under league-wide uniqueness.
     const pool = [
       { id: 8001, firstName: 'Mine', lastName: 'Mine', position: 'G', rating: 99 },
+      { id: 8002, firstName: 'Other', lastName: 'Pick', position: 'G', rating: 90 },
     ];
     const res = await request(app).post('/api/draft/cpu-pick')
       .set('Authorization', `Bearer ${token}`)
       .send({ teamName: cpuName, pool });
     expect(res.status).toBe(200);
-    expect(res.body.pick.id).toBe(8001);
+    expect(res.body.pick.id).toBe(8002);
   });
 });

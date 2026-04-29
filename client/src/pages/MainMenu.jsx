@@ -39,6 +39,15 @@ const MODES = [
     requiresDraftStarted: true,
   },
   {
+    key: 'defensive-playbook',
+    title: 'Defensive Playbook',
+    desc: 'Design NBA defensive sets — zones, presses, switches, traps. Pair with offensive plays in-game.',
+    icon: '\u{1F6E1}\uFE0F',
+    path: '/defensive-playbook',
+    color: '#06b6d4',
+    requiresDraftStarted: true,
+  },
+  {
     key: 'standings',
     title: 'Standings & Career',
     desc: 'Run an 82-game season. View league standings. 5-year career arc.',

@@ -249,6 +249,27 @@ const userSchema = new mongoose.Schema({
   // Favorited NBA players from the Players Bio page
   favoritePlayers: { type: [favoritePlayerSchema], default: [] },
 
+  // Rookie class generated when the previous season + playoffs end. Added to
+  // the next year's draft pool so the user can draft incoming prospects.
+  // Cleared once the user's next draft completes.
+  rookieClass: {
+    type: [{
+      _id: false,
+      playerId: { type: Number },          // synthetic id, >= 20_000_000
+      firstName: String,
+      lastName: String,
+      position: String,
+      school: String,
+      country: String,
+      heightIn: Number,                    // total inches (e.g. 79 = 6'7")
+      weightLb: Number,
+      rating: Number,                      // 60-85 range
+      draftYear: Number,
+    }],
+    default: [],
+  },
+  rookieClassYear: { type: Number, default: 0 },
+
   // Multiplayer presence — updated by /api/auth/me (every poll). A user
   // is considered "online" if lastSeenAt is within the last 2 minutes.
   lastSeenAt: { type: Date, default: null },
@@ -265,6 +286,24 @@ const userSchema = new mongoose.Schema({
       primary: { type: String, default: '' },     // playerId of primary scorer
       secondary: { type: String, default: '' },   // playerId of secondary
       screener: { type: String, default: '' },    // playerId of screener
+      description: { type: String, default: '' },
+      createdAt: { type: Date, default: Date.now },
+    }],
+    default: [],
+  },
+
+  // User-authored DEFENSIVE plays (designed in /defensive-playbook page).
+  // Standard NBA defensive sets — Man-to-Man, 2-3 Zone, 1-3-1, Press, etc.
+  defensivePlays: {
+    type: [{
+      _id: false,
+      id: String,
+      name: { type: String, default: '' },
+      scheme: { type: String, default: 'Man' },   // Man | 2-3 Zone | 3-2 Zone | 1-3-1 | Box-and-1 | Triangle-and-2 | Full-Court Press | Half-Court Trap | Switch-Everything
+      pressure: { type: String, default: 'Half-Court' }, // Half-Court | Three-Quarter | Full-Court
+      stopper: { type: String, default: '' },     // playerId of primary on-ball defender
+      helper: { type: String, default: '' },      // playerId of help defender
+      rebounder: { type: String, default: '' },   // playerId who crashes the glass
       description: { type: String, default: '' },
       createdAt: { type: Date, default: Date.now },
     }],

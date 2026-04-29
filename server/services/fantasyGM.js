@@ -354,12 +354,16 @@ function generateCpuTeams({ userTeam, rng = Math.random } = {}) {
 // Smart CPU draft: each CPU runs a snake-style draft where each pick is
 // the best-available rated player that fills a positional need (cap 3 per
 // position so rosters look balanced), with a small rating-noise jitter so
-// not every CPU ends up identical. Cross-team duplicates are still allowed
-// (only per-team uniqueness is enforced).
-function distributePlayersToCpuTeams({ cpuTeams, pool, picksPerTeam = 15, rng = Math.random }) {
+// not every CPU ends up identical.
+//
+// League-wide uniqueness: the same player cannot land on two CPU rosters.
+// Pass `excludeIds` (e.g. the user's roster ids) so those players are also
+// off-limits. The shared `claimed` set is mutated as picks are made so
+// concurrent CPUs in the same call respect each other's picks.
+function distributePlayersToCpuTeams({ cpuTeams, pool, picksPerTeam = 15, rng = Math.random, excludeIds = [] }) {
   const POS_CAP = 3;
+  const claimed = new Set(excludeIds);
   for (const team of cpuTeams) {
-    const owned = new Set();
     const posCount = {};
     team.players = [];
     // Each CPU has its own scouting noise (some are sharper than others).
@@ -368,7 +372,7 @@ function distributePlayersToCpuTeams({ cpuTeams, pool, picksPerTeam = 15, rng = 
       let best = null;
       let bestScore = -Infinity;
       for (const p of pool) {
-        if (owned.has(p.id)) continue;
+        if (claimed.has(p.id)) continue;
         const pos = p.position || 'F';
         if ((posCount[pos] || 0) >= POS_CAP) continue;
         const score = (p.rating || 70) + (rng() - 0.5) * scoutNoise;
@@ -377,13 +381,13 @@ function distributePlayersToCpuTeams({ cpuTeams, pool, picksPerTeam = 15, rng = 
       if (!best) {
         // All position caps full — relax the cap to fill final roster slots.
         for (const p of pool) {
-          if (owned.has(p.id)) continue;
+          if (claimed.has(p.id)) continue;
           const score = (p.rating || 70) + (rng() - 0.5) * scoutNoise;
           if (score > bestScore) { bestScore = score; best = p; }
         }
       }
       if (!best) break;
-      owned.add(best.id);
+      claimed.add(best.id);
       posCount[best.position || 'F'] = (posCount[best.position || 'F'] || 0) + 1;
       team.players.push({
         playerId: best.id,
