@@ -4,11 +4,11 @@ import { useAuth } from '../context/AuthContext';
 
 const MODES = [
   {
-    key: 'fantasy',
-    title: 'Fantasy Draft',
-    desc: 'Be the GM. Pick a city, conference, division, coach. Draft 12 players. Earn 500 tokens.',
-    icon: '\u{1F3C6}',
-    path: '/draft',
+    key: 'packs',
+    title: 'Build Your Team',
+    desc: 'Create your franchise, then open card packs (5 players each, 20/30/40 tokens) until your 15-man roster is full.',
+    icon: '\u{1F0CF}',
+    path: '/packs',
     color: '#f97316',
   },
   {

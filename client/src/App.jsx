@@ -4,6 +4,7 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import LoginPage from './pages/LoginPage';
 import MainMenu from './pages/MainMenu';
 import DraftPage from './pages/DraftPage';
+import PacksPage from './pages/PacksPage';
 import GamePage from './pages/GamePage';
 import OneOnOnePage from './pages/OneOnOnePage';
 import BlacktopPage from './pages/BlacktopPage';
@@ -32,7 +33,7 @@ function ProtectedRoute({ children }) {
 function DraftGate({ children }) {
   const { user, loading } = useAuth();
   if (loading) return <div style={{ color: '#fff', textAlign: 'center', padding: 40 }}>Loading...</div>;
-  if (!user?.draftCompleted) return <Navigate to="/draft" replace />;
+  if (!user?.draftCompleted) return <Navigate to="/packs" replace />;
   return children;
 }
 
@@ -40,7 +41,7 @@ function DraftGate({ children }) {
 function DraftStartedGate({ children }) {
   const { user, loading } = useAuth();
   if (loading) return <div style={{ color: '#fff', textAlign: 'center', padding: 40 }}>Loading...</div>;
-  if (!user?.draftStarted) return <Navigate to="/draft" replace />;
+  if (!user?.draftStarted) return <Navigate to="/packs" replace />;
   return children;
 }
 
@@ -86,6 +87,7 @@ function AppRoutes() {
         <Route path="/login" element={token ? <Navigate to="/menu" replace /> : <LoginPage />} />
         <Route path="/menu" element={<ProtectedRoute><MainMenu /></ProtectedRoute>} />
         <Route path="/draft" element={<ProtectedRoute><DraftPage /></ProtectedRoute>} />
+        <Route path="/packs" element={<ProtectedRoute><PacksPage /></ProtectedRoute>} />
         <Route path="/store" element={<ProtectedRoute><DraftStartedGate><StorePage /></DraftStartedGate></ProtectedRoute>} />
         <Route path="/team" element={<ProtectedRoute><DraftStartedGate><TeamManagementPage /></DraftStartedGate></ProtectedRoute>} />
         <Route path="/playbook" element={<ProtectedRoute><DraftStartedGate><PlaybookPage /></DraftStartedGate></ProtectedRoute>} />
