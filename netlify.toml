@@ -7,6 +7,11 @@
   # Override on Netlify dashboard (Site settings > Environment) per environment.
   # CRA bakes REACT_APP_* into the bundle at build time.
   NODE_VERSION = "18"
+  # Pin Python to a real, installable release. Netlify's mise toolchain otherwise
+  # tries to resolve a non-existent version (e.g. 3.14.3) and fails the build
+  # before npm install runs. This project doesn't use Python at runtime; we just
+  # need *something* mise can install so the toolchain step succeeds.
+  PYTHON_VERSION = "3.12.2"
 
 # SPA fallback: every unknown path returns index.html so React Router handles it.
 [[redirects]]
