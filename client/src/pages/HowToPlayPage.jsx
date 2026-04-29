@@ -27,7 +27,8 @@ export default function HowToPlayPage() {
 
   const scrollTo = (id) => {
     setActive(id);
-    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const el = document.getElementById(id);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
   return (
