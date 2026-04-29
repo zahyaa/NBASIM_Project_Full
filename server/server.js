@@ -42,6 +42,17 @@ const allowedOrigins = (process.env.CORS_ORIGIN || defaultOrigins)
   .split(',')
   .map(s => s.trim())
   .filter(Boolean);
+// Production safety: refuse to start with no allowed origins, or warn loudly
+// when '*' is configured (allows any site to call the API with credentials).
+if (process.env.NODE_ENV === 'production') {
+  if (allowedOrigins.length === 0) {
+    console.warn('\u26A0\uFE0F  CORS_ORIGIN is not set in production. All cross-origin browser requests will be blocked. Set CORS_ORIGIN to a comma-separated list of allowed origins.');
+  } else if (allowedOrigins.includes('*')) {
+    console.warn('\u26A0\uFE0F  CORS_ORIGIN contains "*" in production. This allows any origin to call the API with credentials and is unsafe. Replace with an explicit allow-list.');
+  } else {
+    console.log(`CORS allow-list: ${allowedOrigins.join(', ')}`);
+  }
+}
 app.use(cors({
   origin: (origin, cb) => {
     if (!origin) return cb(null, true); // same-origin / curl

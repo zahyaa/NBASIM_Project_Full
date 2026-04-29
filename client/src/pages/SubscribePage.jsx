@@ -107,12 +107,15 @@ export default function SubscribePage() {
           PayPal {!catalog.paypalEnabled && '(sandbox)'}
         </button>
         <button onClick={() => setMethod('credit-card')} style={{ ...s.methodBtn, ...(method === 'credit-card' ? s.activeMethod : {}) }} data-testid="pay-card">
-          Credit Card
+          Credit Card (sandbox)
         </button>
       </div>
 
       {method === 'credit-card' && (
         <div style={s.cardForm}>
+          <div style={{ background: 'rgba(250,204,21,0.12)', border: '1px solid rgba(250,204,21,0.4)', color: '#fde68a', padding: '10px 12px', borderRadius: 8, marginBottom: 10, fontSize: 13, lineHeight: 1.5 }}>
+            <strong>Sandbox mode.</strong> This form does NOT process real charges and is for demo purposes only. No PCI-compliant gateway is wired in. Use any 16-digit test number — only the last 4 digits are recorded.
+          </div>
           <input placeholder="Card Number" value={card.number} onChange={e => setCard({ ...card, number: e.target.value })} style={s.input} />
           <input placeholder="Name on card" value={card.name} onChange={e => setCard({ ...card, name: e.target.value })} style={s.input} />
           <input placeholder="MM" maxLength={2} value={card.expMonth} onChange={e => setCard({ ...card, expMonth: e.target.value })} style={{ ...s.input, width: 60 }} />

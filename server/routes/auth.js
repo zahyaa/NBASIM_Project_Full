@@ -11,6 +11,10 @@ router.post('/register', async (req, res) => {
     if (!username || !password) {
       return res.status(400).json({ error: 'Username and password required' });
     }
+    // Username: 3-20 chars, alphanumeric + underscore + hyphen only.
+    if (!/^[A-Za-z0-9_-]{3,20}$/.test(username)) {
+      return res.status(400).json({ error: 'Username must be 3-20 characters and contain only letters, numbers, underscore, or hyphen' });
+    }
     if (password.length < 6) {
       return res.status(400).json({ error: 'Password must be at least 6 characters' });
     }

@@ -120,7 +120,22 @@ function simulateGame(teamA, teamB, opts = {}) {
       pBox.min += Math.round(elapsed / 60 * 10) / 10;
 
       const sideMul = isTeamA ? shotMulA : shotMulB;
-      const shotChance = (0.35 + (player.rating / 99) * 0.25 + (isTeamA ? coachBoostA : coachBoostB)) * sideMul;
+      // Clamp to a sane range so legacy + elite players can't push above ~0.85
+      // and miss-bucket thresholds remain reachable at every difficulty.
+      const rawChance = (0.35 + (player.rating / 99) * 0.25 + (isTeamA ? coachBoostA : coachBoostB)) * sideMul;
+      const shotChance = Math.max(0.25, Math.min(0.85, rawChance));
+      // Made-shot ceiling: scoring outcomes occupy [0, made]; misses, steals,
+      // assists, blocks, turnovers, fouls split the remaining (1 - made)
+      // proportionally so miss rates scale inversely with difficulty.
+      const made    = shotChance * 0.88;
+      const rem     = 1 - made;
+      const tMiss2  = made + rem * 0.32;
+      const tMiss3  = made + rem * 0.50;
+      const tAst    = made + rem * 0.62;
+      const tStl    = made + rem * 0.74;
+      const tBlk    = made + rem * 0.84;
+      const tTO     = made + rem * 0.95;
+      // remaining tail = foul
       const roll = Math.random();
 
       let points = 0;
@@ -159,7 +174,7 @@ function simulateGame(teamA, teamB, opts = {}) {
         if (ft2) { pBox.ftm++; tStats.ftm++; points++; }
         playText = `${player.firstName} ${player.lastName} goes to the line: ${ft1 ? '✓' : '✗'}/${ft2 ? '✓' : '✗'} (${points} pts)`;
         playType = points > 0 ? 'score' : 'miss';
-      } else if (roll < 0.72) {
+      } else if (roll < tMiss2) {
         // Missed 2pt
         pBox.fga++; tStats.fga++;
         playText = `${player.firstName} ${player.lastName} misses the shot.`;
@@ -173,7 +188,7 @@ function simulateGame(teamA, teamB, opts = {}) {
         const rebStats = offReb ? tStats : oStats;
         rebBox.reb++; rebStats.reb++;
         playText += ` ${rebounder.firstName} ${rebounder.lastName} grabs the rebound.`;
-      } else if (roll < 0.78) {
+      } else if (roll < tMiss3) {
         // Missed 3pt
         pBox.fga++; pBox.fg3a++; tStats.fga++; tStats.fg3a++;
         playText = `${player.firstName} ${player.lastName} misses the three.`;
@@ -182,7 +197,7 @@ function simulateGame(teamA, teamB, opts = {}) {
         const rebounder = pickWeightedPlayer(oRoster.slice(0, 5));
         oBox[rebounder.playerId].reb++; oStats.reb++;
         playText += ` ${rebounder.firstName} ${rebounder.lastName} rebounds.`;
-      } else if (roll < 0.83) {
+      } else if (roll < tAst) {
         // Assist + score
         const assister = active.find(p => p.playerId !== player.playerId) || player;
         box[assister.playerId].ast++; tStats.ast++;
@@ -191,14 +206,14 @@ function simulateGame(teamA, teamB, opts = {}) {
         playText = `${assister.firstName} ${assister.lastName} finds ${player.firstName} ${player.lastName} for the easy bucket!`;
         playType = 'score';
         shots.push({ team: teamName, ...randomShotLocation('paint'), made: true, type: '2pt' });
-      } else if (roll < 0.87) {
+      } else if (roll < tStl) {
         // Steal
         const stealer = pickWeightedPlayer(oRoster.slice(0, 5));
         oBox[stealer.playerId].stl++; oStats.stl++;
         pBox.turnover++; tStats.turnover++;
         playText = `${stealer.firstName} ${stealer.lastName} steals it from ${player.firstName} ${player.lastName}!`;
         playType = 'steal';
-      } else if (roll < 0.91) {
+      } else if (roll < tBlk) {
         // Block
         const blocker = pickWeightedPlayer(oRoster.slice(0, 5));
         oBox[blocker.playerId].blk++; oStats.blk++;
@@ -206,7 +221,7 @@ function simulateGame(teamA, teamB, opts = {}) {
         playText = `${blocker.firstName} ${blocker.lastName} blocks ${player.firstName} ${player.lastName}!`;
         playType = 'block';
         shots.push({ team: teamName, ...randomShotLocation('paint'), made: false, type: '2pt', blocked: true });
-      } else if (roll < 0.96) {
+      } else if (roll < tTO) {
         // Turnover
         pBox.turnover++; tStats.turnover++;
         playText = `${player.firstName} ${player.lastName} turns the ball over.`;
@@ -279,8 +294,9 @@ function simulateGame(teamA, teamB, opts = {}) {
       if (!player) continue;
       const pBox = box[player.playerId];
 
-      const shotChance = (0.35 + (player.rating / 99) * 0.25 + (isTeamA ? coachBoostA : coachBoostB))
+      const rawChance = (0.35 + (player.rating / 99) * 0.25 + (isTeamA ? coachBoostA : coachBoostB))
         * (isTeamA ? shotMulA : shotMulB);
+      const shotChance = Math.max(0.25, Math.min(0.85, rawChance));
       const roll = Math.random();
       let points = 0;
       let playText = '';

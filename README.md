@@ -293,15 +293,15 @@ The same setup works on **Railway** or **Fly.io** with the same `npm run build` 
 
 ## 📸 Screenshots
 
-![Screenshot 1](./assets/screenshots/screenshot1.png)
+![Screenshot 1](./docs/screenshots/screenshot1.png)
 
-![Screenshot 2](./assets/screenshots/screenshot2.png)
+![Screenshot 2](./docs/screenshots/screenshot2.png)
 
-![Screenshot 3](./assets/screenshots/screenshot3.png)
+![Screenshot 3](./docs/screenshots/screenshot3.png)
 
-![Screenshot 4](./assets/screenshots/screenshot4.png)
+![Screenshot 4](./docs/screenshots/screenshot4.png)
 
-![Screenshot 5](./assets/screenshots/screenshot5.png)
+![Screenshot 5](./docs/screenshots/screenshot5.png)
 
 ---
 
