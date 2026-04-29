@@ -1,7 +1,8 @@
 [build]
   base    = "client"
   command = "CI=false NODE_OPTIONS=--openssl-legacy-provider npm run build"
-  publish = "client/build"
+  # `publish` is resolved relative to `base`, so this points at client/build.
+  publish = "build"
 
 [build.environment]
   # Override on Netlify dashboard (Site settings > Environment) per environment.
