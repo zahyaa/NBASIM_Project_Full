@@ -3,6 +3,21 @@
  * Tracks ESPN-style box scores, team stats, shot chart, quarter scores, win probability.
  */
 
+// Difficulty modifiers — applied to the CPU side when the user plays a CPU.
+// Higher difficulty = CPU shoots better and adds a quick-sim score bonus.
+// 'pro' is neutral (the historical default behaviour).
+const DIFFICULTY_MODS = {
+  easy:    { cpuShotMul: 0.85, cpuScoreBonus: -7,  userShotMul: 1.05, userScoreBonus: +3 },
+  pro:     { cpuShotMul: 1.00, cpuScoreBonus:  0,  userShotMul: 1.00, userScoreBonus:  0 },
+  hard:    { cpuShotMul: 1.08, cpuScoreBonus: +6,  userShotMul: 0.97, userScoreBonus: -2 },
+  allstar: { cpuShotMul: 1.15, cpuScoreBonus: +11, userShotMul: 0.94, userScoreBonus: -4 },
+  legacy:  { cpuShotMul: 1.22, cpuScoreBonus: +16, userShotMul: 0.90, userScoreBonus: -7 },
+};
+
+function getDifficultyMods(difficulty) {
+  return DIFFICULTY_MODS[difficulty] || DIFFICULTY_MODS.pro;
+}
+
 function pickWeightedPlayer(players) {
   if (!players || players.length === 0) return null;
   const total = players.reduce((sum, p) => sum + (p.rating || 50), 0);
@@ -50,9 +65,25 @@ function randomShotLocation(shotType) {
   return { x: Math.round(250 + r * Math.cos(angle)), y: Math.round(400 - r * Math.sin(angle)) };
 }
 
-function simulateGame(teamA, teamB) {
+function simulateGame(teamA, teamB, opts = {}) {
   const QUARTERS = 4;
   const SECONDS_PER_QUARTER = 720;
+
+  // Coach playbook bonus — sharper sets => higher shot conversion.
+  // User defaults to 7 (neutral); CPU teams get 7–10 from generation.
+  const coachA = teamA?.coachRating ?? 7;
+  const coachB = teamB?.coachRating ?? 7;
+  // Each rating point above 7 adds +1.5% to that team's shot chance.
+  const coachBoostA = (coachA - 7) * 0.015;
+  const coachBoostB = (coachB - 7) * 0.015;
+
+  // Difficulty multipliers applied per side. userSide ('A'|'B') marks which
+  // team is the human; the other side gets the CPU mod. When userSide is
+  // omitted (CPU vs CPU, or user vs user) both sides stay at 1.0.
+  const mods = getDifficultyMods(opts.difficulty);
+  let shotMulA = 1, shotMulB = 1;
+  if (opts.userSide === 'A') { shotMulA = mods.userShotMul; shotMulB = mods.cpuShotMul; }
+  else if (opts.userSide === 'B') { shotMulA = mods.cpuShotMul; shotMulB = mods.userShotMul; }
 
   const boxA = {}, boxB = {};
   const statsA = initTeamStats(), statsB = initTeamStats();
@@ -88,7 +119,8 @@ function simulateGame(teamA, teamB) {
       const pBox = box[player.playerId];
       pBox.min += Math.round(elapsed / 60 * 10) / 10;
 
-      const shotChance = 0.35 + (player.rating / 99) * 0.25;
+      const sideMul = isTeamA ? shotMulA : shotMulB;
+      const shotChance = (0.35 + (player.rating / 99) * 0.25 + (isTeamA ? coachBoostA : coachBoostB)) * sideMul;
       const roll = Math.random();
 
       let points = 0;
@@ -247,7 +279,8 @@ function simulateGame(teamA, teamB) {
       if (!player) continue;
       const pBox = box[player.playerId];
 
-      const shotChance = 0.35 + (player.rating / 99) * 0.25;
+      const shotChance = (0.35 + (player.rating / 99) * 0.25 + (isTeamA ? coachBoostA : coachBoostB))
+        * (isTeamA ? shotMulA : shotMulB);
       const roll = Math.random();
       let points = 0;
       let playText = '';
@@ -462,4 +495,4 @@ function simulateBlacktop(teamA, teamB, targetScore = 21) {
   };
 }
 
-module.exports = { simulateGame, simulate1v1, simulateBlacktop, pickWeightedPlayer };
+module.exports = { simulateGame, simulate1v1, simulateBlacktop, pickWeightedPlayer, getDifficultyMods };

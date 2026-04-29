@@ -9,6 +9,8 @@
 //   so each division has 5 teams, with no duplicate cities, names, or
 //   coaches relative to the user.
 
+const { getDifficultyMods } = require('./simulation');
+
 const DIVISIONS = {
   East: ['Atlantic', 'Central', 'Southeast'],
   West: ['Northwest', 'Pacific', 'Southwest'],
@@ -326,10 +328,15 @@ function generateCpuTeams({ userTeam, rng = Math.random } = {}) {
           name = `${city} ${mascot}`;
         }
         usedNames.add(name);
+        // Legacy-difficulty CPU coaches — every CPU runs a real playbook.
+        // Rating 7–10 with most coaches at 8–9, a few elite at 10.
+        const coachRoll = rng();
+        const coachRating = coachRoll < 0.15 ? 10 : coachRoll < 0.55 ? 9 : coachRoll < 0.9 ? 8 : 7;
         teams.push({
           name,
           city,
           coach,
+          coachRating,
           conference,
           division,
           marketTier: tierForCity(city),
@@ -344,31 +351,110 @@ function generateCpuTeams({ userTeam, rng = Math.random } = {}) {
 // Distribute drafted players across CPU teams from a pool of available
 // players. Returns the populated cpuTeams array (mutated in place too).
 //
-// Each team picks INDEPENDENTLY from the full pool — duplicates across
-// teams are intentional (the differentiator is items bought at the Store).
-// Only per-team uniqueness is enforced so a single CPU never doubles up
-// on the same player.
+// Smart CPU draft: each CPU runs a snake-style draft where each pick is
+// the best-available rated player that fills a positional need (cap 3 per
+// position so rosters look balanced), with a small rating-noise jitter so
+// not every CPU ends up identical. Cross-team duplicates are still allowed
+// (only per-team uniqueness is enforced).
 function distributePlayersToCpuTeams({ cpuTeams, pool, picksPerTeam = 15, rng = Math.random }) {
+  const POS_CAP = 3;
   for (const team of cpuTeams) {
     const owned = new Set();
-    const available = shuffle(pool.slice(), rng);
+    const posCount = {};
     team.players = [];
-    while (team.players.length < picksPerTeam && available.length) {
-      const p = available.shift();
-      if (owned.has(p.id)) continue;
-      owned.add(p.id);
+    // Each CPU has its own scouting noise (some are sharper than others).
+    const scoutNoise = 4 + rng() * 6; // ±2 to ±5 rating swing per pick
+    while (team.players.length < picksPerTeam) {
+      let best = null;
+      let bestScore = -Infinity;
+      for (const p of pool) {
+        if (owned.has(p.id)) continue;
+        const pos = p.position || 'F';
+        if ((posCount[pos] || 0) >= POS_CAP) continue;
+        const score = (p.rating || 70) + (rng() - 0.5) * scoutNoise;
+        if (score > bestScore) { bestScore = score; best = p; }
+      }
+      if (!best) {
+        // All position caps full — relax the cap to fill final roster slots.
+        for (const p of pool) {
+          if (owned.has(p.id)) continue;
+          const score = (p.rating || 70) + (rng() - 0.5) * scoutNoise;
+          if (score > bestScore) { bestScore = score; best = p; }
+        }
+      }
+      if (!best) break;
+      owned.add(best.id);
+      posCount[best.position || 'F'] = (posCount[best.position || 'F'] || 0) + 1;
       team.players.push({
-        playerId: p.id,
-        firstName: p.firstName,
-        lastName: p.lastName,
-        position: p.position,
-        rating: p.rating,
-        stats: p.stats,
-        contract: { years: 1 + Math.floor(rng() * 4), salary: Math.round((p.rating || 70) * 0.5) },
+        playerId: best.id,
+        firstName: best.firstName,
+        lastName: best.lastName,
+        position: best.position,
+        rating: best.rating,
+        stats: best.stats,
+        contract: { years: 1 + Math.floor(rng() * 4), salary: Math.round((best.rating || 70) * 0.5) },
       });
     }
   }
   return cpuTeams;
+}
+
+// CPU front-office tick — runs after each user-played (or simulated) game.
+// Lets a few CPU teams "work on their roster" so the league gets harder
+// over the course of a season:
+//   - 25% of CPU teams develop their lowest-rated bench player (+1-2 rating)
+//   - 10% chance a CPU team makes an internal swap, promoting a bench guy
+//     who had a small ratings bump (representing a hot streak)
+//   - rare (5%) league-wide "new free agent signing" boost to a random
+//     starter on a sub-.500 team to keep parity
+// Caps individual ratings at 95.
+function cpuFrontOfficeTick(user, rng = Math.random) {
+  if (!user || !Array.isArray(user.cpuTeams) || !user.cpuTeams.length) return;
+  const events = [];
+  for (const team of user.cpuTeams) {
+    if (!team.players || !team.players.length) continue;
+    if (rng() < 0.25) {
+      // Develop the lowest-rated player on the roster.
+      const sorted = [...team.players].sort((a, b) => (a.rating || 0) - (b.rating || 0));
+      const target = sorted[0];
+      if (target && (target.rating || 0) < 95) {
+        const bump = 1 + Math.floor(rng() * 2);
+        target.rating = Math.min(95, (target.rating || 70) + bump);
+        events.push(`${team.name}: ${target.firstName} ${target.lastName} +${bump} (development)`);
+      }
+    }
+    if (rng() < 0.10) {
+      // Hot streak — random non-starter gets a small bump.
+      const bench = team.players.slice(5);
+      if (bench.length) {
+        const target = bench[Math.floor(rng() * bench.length)];
+        if ((target.rating || 0) < 95) {
+          target.rating = Math.min(95, (target.rating || 70) + 1);
+          events.push(`${team.name}: ${target.firstName} ${target.lastName} +1 (hot streak)`);
+        }
+      }
+    }
+  }
+  // Parity boost: pick one sub-.500 CPU team and bump a starter.
+  if (rng() < 0.05 && Array.isArray(user.cpuRecords)) {
+    const losers = user.cpuTeams.filter(t => {
+      const rec = user.cpuRecords.find(r => r.name === t.name);
+      return rec && (rec.wins + rec.losses > 0) && rec.wins < rec.losses;
+    });
+    if (losers.length) {
+      const team = losers[Math.floor(rng() * losers.length)];
+      const starters = (team.players || []).slice(0, 5);
+      if (starters.length) {
+        const target = starters[Math.floor(rng() * starters.length)];
+        if ((target.rating || 0) < 95) {
+          target.rating = Math.min(95, (target.rating || 70) + 2);
+          events.push(`${team.name}: signed FA boost on ${target.firstName} ${target.lastName} +2`);
+        }
+      }
+    }
+  }
+  if (events.length) user.markModified('cpuTeams');
+  return events;
 }
 
 module.exports = {
@@ -385,6 +471,8 @@ module.exports = {
   isValidConferenceDivision,
   generateCpuTeams,
   distributePlayersToCpuTeams,
+  cpuFrontOfficeTick,
+  applyLineup,
   shuffle,
   awardRewards,
   generateSchedule,
@@ -392,25 +480,132 @@ module.exports = {
   teamAvgRating,
 };
 
+// Reorder a roster so the user's chosen starting 5 (players with
+// inLineup === true) sit at index 0–4. simulateGame() takes the first 5
+// as the active unit, so this is what makes the user's lineup actually
+// affect game outcomes.
+//
+// If the user hasn't set 5 starters yet (or set fewer), we backfill from
+// the highest-rated remaining players so the simulation always has 5.
+function applyLineup(team) {
+  if (!team || !Array.isArray(team.players) || team.players.length === 0) return team;
+  const starters = team.players.filter(p => p.inLineup);
+  const bench = team.players.filter(p => !p.inLineup);
+  // Backfill from bench (highest-rated first) until we have 5 starters.
+  if (starters.length < 5) {
+    bench.sort((a, b) => (b.rating || 0) - (a.rating || 0));
+    while (starters.length < 5 && bench.length) starters.push(bench.shift());
+  }
+  return { ...team, players: [...starters.slice(0, 5), ...bench] };
+}
+
 // Average roster rating — used as the strength signal for the lightweight
 // CPU-vs-CPU sim that fills out the standings as the user progresses.
 function teamAvgRating(team) {
   const players = team?.players || [];
   if (!players.length) return 70;
-  return players.reduce((s, p) => s + (p.rating || 70), 0) / players.length;
+  // Starters drive performance: 70% weight on the active 5, 30% on bench.
+  // We pick starters from `inLineup` flags when set (the user's chosen
+  // lineup), otherwise fall back to the top 5 by rating. This makes the
+  // user's Lineup tab choice actually affect quickSim outcomes too \u2014 not
+  // just full-simulation games.
+  const flagged = players.filter(p => p.inLineup);
+  let starters, bench;
+  if (flagged.length >= 1) {
+    // Backfill from highest-rated bench until we have 5 starters.
+    const rest = players.filter(p => !p.inLineup).sort((a, b) => (b.rating || 0) - (a.rating || 0));
+    starters = [...flagged];
+    while (starters.length < 5 && rest.length) starters.push(rest.shift());
+    bench = rest;
+  } else {
+    const sorted = [...players].sort((a, b) => (b.rating || 0) - (a.rating || 0));
+    starters = sorted.slice(0, 5);
+    bench = sorted.slice(5);
+  }
+  const avg = (arr) => arr.length ? arr.reduce((s, p) => s + (p.rating || 70), 0) / arr.length : 70;
+  const startAvg = avg(starters);
+  const benchAvg = bench.length ? avg(bench) : startAvg;
+  return startAvg * 0.7 + benchAvg * 0.3;
 }
 
-// Generate an 82-game schedule for the user against their CPU rivals.
-// Cycles through CPUs in a random order so each opponent shows up roughly
-// the same number of times (matching the real NBA's 82-game cadence).
-function generateSchedule({ cpuTeams, games = 82, rng = Math.random }) {
-  const opponents = shuffle(cpuTeams.map(t => t.name), rng);
-  if (opponents.length === 0) return [];
+// Generate an 82-game schedule following NBA scheduling logic:
+//   • Same division (4 teams)        — 4 games each = 16
+//   • Same conference, other div (10) — ~3.6 each = 36 (8 of them get 4, rest 3)
+//   • Other conference (15)            — 2 games each = 30
+// Total: 16 + 36 + 30 = 82.
+//
+// `userTeam` { conference, division } is required to apply the conference
+// weighting; if omitted we fall back to the legacy round-robin so existing
+// tests keep passing.
+//
+// Each game also gets a `gameDate` (an NBA-style late-October to mid-April
+// window) and an `isHome` flag (alternates per opponent for fairness).
+function generateSchedule({ cpuTeams, userTeam, games = 82, rng = Math.random, startDate } = {}) {
+  if (!Array.isArray(cpuTeams) || cpuTeams.length === 0) return [];
+
+  // ---- Build a weighted opponent pool that respects NBA logic. ----
+  let pool = [];
+  if (userTeam?.conference && userTeam?.division) {
+    const sameDiv = cpuTeams.filter(t => t.conference === userTeam.conference && t.division === userTeam.division);
+    const sameConf = cpuTeams.filter(t => t.conference === userTeam.conference && t.division !== userTeam.division);
+    const otherConf = cpuTeams.filter(t => t.conference !== userTeam.conference);
+    // Same division → 4 games each.
+    for (const t of sameDiv) for (let i = 0; i < 4; i++) pool.push(t.name);
+    // Other conference → 2 games each.
+    for (const t of otherConf) for (let i = 0; i < 2; i++) pool.push(t.name);
+    // Same conference / other div → distribute remaining games.
+    // Each gets 3 base + a few teams get +1 to reach 82 total.
+    const baseSameConf = 3;
+    let used = pool.length + sameConf.length * baseSameConf;
+    let bonus = games - used; // teams that get +1 game (3 → 4)
+    const shuffledConf = shuffle(sameConf.slice(), rng);
+    for (let i = 0; i < shuffledConf.length; i++) {
+      const reps = baseSameConf + (i < bonus ? 1 : 0);
+      for (let k = 0; k < reps; k++) pool.push(shuffledConf[i].name);
+    }
+    // Trim or top-up if rounding left us off.
+    while (pool.length > games) pool.pop();
+    while (pool.length < games) pool.push(cpuTeams[Math.floor(rng() * cpuTeams.length)].name);
+  } else {
+    // Legacy fallback: round-robin without conference weighting.
+    const opps = shuffle(cpuTeams.map(t => t.name), rng);
+    for (let i = 0; i < games; i++) pool.push(opps[i % opps.length]);
+  }
+
+  // ---- Spread the matchups out so the same opponent doesn't repeat
+  // back-to-back. We randomize within buckets of teams that share rep counts.
+  const ordered = shuffle(pool, rng);
+  // Single pass anti-clump: if two adjacent are equal, swap one forward.
+  for (let i = 1; i < ordered.length; i++) {
+    if (ordered[i] === ordered[i - 1]) {
+      for (let j = i + 1; j < ordered.length; j++) {
+        if (ordered[j] !== ordered[i - 1]) {
+          [ordered[i], ordered[j]] = [ordered[j], ordered[i]];
+          break;
+        }
+      }
+    }
+  }
+
+  // ---- Generate dates: ~5 months, 4 games per week on average. ----
+  // NBA regular season runs late Oct to mid-April. We assume 170 days for 82 games.
+  const start = startDate ? new Date(startDate) : new Date(new Date().getFullYear(), 9, 24); // Oct 24
+  const REGULAR_SEASON_DAYS = 170;
+  const gameDayGap = REGULAR_SEASON_DAYS / games; // ~2.07 days/game
+
+  // ---- Per-opponent home/away alternation for fairness. ----
+  const homeFlip = {};
   const schedule = [];
-  for (let i = 0; i < games; i++) {
+  for (let i = 0; i < ordered.length; i++) {
+    const opponent = ordered[i];
+    const date = new Date(start);
+    date.setDate(start.getDate() + Math.round(i * gameDayGap));
+    homeFlip[opponent] = !homeFlip[opponent];
     schedule.push({
       gameNumber: i + 1,
-      opponent: opponents[i % opponents.length],
+      opponent,
+      gameDate: date.toISOString().slice(0, 10),
+      isHome: homeFlip[opponent],
       played: false,
       win: false,
       scoreUser: 0,
@@ -422,12 +617,27 @@ function generateSchedule({ cpuTeams, games = 82, rng = Math.random }) {
 
 // Lightweight CPU-vs-CPU result based on average roster ratings, with noise.
 // Returns { winner: 'A'|'B', scoreA, scoreB }.
-function quickSimRecord(teamA, teamB, rng = Math.random) {
+// Tuned: rating advantage matters more (1.6x weight, was 1.2x) and noise is
+// tighter (±6, was ±8) so good rosters consistently beat weaker ones.
+// Coach playbook rating adds a bonus on top so CPU teams with elite coaches
+// punch above their roster (legacy difficulty).
+//
+// `opts.difficulty` + `opts.userSide` ('A'|'B') tilt the score in the CPU's
+// favour at higher difficulty (and the user's favour on easy). When the
+// user side isn't passed (CPU vs CPU) the modifier is symmetric and a no-op.
+function quickSimRecord(teamA, teamB, rng = Math.random, opts = {}) {
   const a = teamAvgRating(teamA);
   const b = teamAvgRating(teamB);
-  const noise = () => (rng() - 0.5) * 16;
-  const scoreA = Math.max(70, Math.round(85 + (a - 75) * 1.2 + noise()));
-  const scoreB = Math.max(70, Math.round(85 + (b - 75) * 1.2 + noise()));
+  // Default user (or any team without coachRating) sits at 7.
+  const coachA = (teamA?.coachRating ?? 7);
+  const coachB = (teamB?.coachRating ?? 7);
+  const mods = getDifficultyMods(opts.difficulty);
+  let bonusA = 0, bonusB = 0;
+  if (opts.userSide === 'A') { bonusA = mods.userScoreBonus; bonusB = mods.cpuScoreBonus; }
+  else if (opts.userSide === 'B') { bonusA = mods.cpuScoreBonus; bonusB = mods.userScoreBonus; }
+  const noise = () => (rng() - 0.5) * 12;
+  const scoreA = Math.max(70, Math.round(85 + (a - 75) * 1.6 + (coachA - 7) * 1.8 + bonusA + noise()));
+  const scoreB = Math.max(70, Math.round(85 + (b - 75) * 1.6 + (coachB - 7) * 1.8 + bonusB + noise()));
   // Tie-break with a coin flip.
   if (scoreA === scoreB) return rng() < 0.5
     ? { winner: 'A', scoreA: scoreA + 1, scoreB }

@@ -4,6 +4,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
+import GameCast from '../components/GameCast';
 
 export default function PlayoffsPage() {
   const { token, user } = useAuth();
@@ -11,6 +12,10 @@ export default function PlayoffsPage() {
   const [state, setState] = useState({ locked: true, started: false, completed: false, rounds: [] });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  // Stack of finished user-series games to replay in a modal.
+  const [pbpGames, setPbpGames] = useState([]);
+  const [pbpIdx, setPbpIdx] = useState(0);
+  const [pbpSeriesLabel, setPbpSeriesLabel] = useState('');
 
   const load = useCallback(async () => {
     setError('');
@@ -32,9 +37,32 @@ export default function PlayoffsPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
+      if (Array.isArray(data.playByPlay) && data.playByPlay.length) {
+        setPbpGames(data.playByPlay);
+        setPbpIdx(0);
+        setPbpSeriesLabel(`${data.round || ''} — ${data.series?.teamA?.name} vs ${data.series?.teamB?.name}`);
+      }
       load();
     } catch (err) { setError(err.message); }
     setBusy(false);
+  };
+
+  // Was the user's team cut from the bracket? Their team appears in
+  // state.eliminated when they finished 9th or worse in their conference.
+  const userMissedPlayoffs = Array.isArray(state.eliminated)
+    && state.eliminated.some(t => t.isUser);
+  const userElim = state.eliminated?.find(t => t.isUser);
+
+  const advanceToNextSeason = async () => {
+    setBusy(true); setError('');
+    try {
+      const res = await fetch('/api/season/advance?skipPlayoffs=1', {
+        method: 'POST', headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      navigate('/standings');
+    } catch (err) { setError(err.message); setBusy(false); }
   };
 
   if (state.locked) {
@@ -65,6 +93,26 @@ export default function PlayoffsPage() {
 
       {error && <div style={s.error}>{error}</div>}
 
+      {userMissedPlayoffs && (
+        <div style={s.missedBanner} data-testid="po-missed-banner">
+          <div style={{ fontSize: 22, fontWeight: 800, marginBottom: 6 }}>
+            ❌ You did not make the playoffs
+          </div>
+          <div style={{ fontSize: 14, opacity: 0.9, marginBottom: 12 }}>
+            {user?.team?.name} finished {userElim?.wins}-{userElim?.losses}
+            {' · '}#{userElim?.confRank} in the {userElim?.conference}ern Conference.
+            {' '}Only the top 8 advance. Your season is over.
+          </div>
+          <button onClick={advanceToNextSeason} disabled={busy}
+                  style={s.primaryBtn} data-testid="po-advance-from-missed">
+            {busy ? 'Advancing...' : 'Advance to Next Season →'}
+          </button>
+          <div style={{ marginTop: 10, fontSize: 12, color: '#fde68a' }}>
+            (You can still watch the rest of the league play out below.)
+          </div>
+        </div>
+      )}
+
       <div style={s.controls}>
         {!state.started && <button style={s.primaryBtn} disabled={busy} onClick={() => action('start')}>Start Playoffs</button>}
         {state.started && !state.completed && (
@@ -84,6 +132,68 @@ export default function PlayoffsPage() {
               {round.series.map((sr, i) => <SeriesCard key={i} series={sr} userTeam={user?.team?.name} />)}
             </div>
           ))}
+        </div>
+      )}
+
+      {Array.isArray(state.eliminated) && state.eliminated.length > 0 && (
+        <div style={s.dnqPanel} data-testid="po-dnq-panel">
+          <h3 style={s.dnqTitle}>Did Not Qualify — Top 8 in each conference advance</h3>
+          <div style={s.dnqGrid}>
+            {['East', 'West'].map(conf => {
+              const teams = state.eliminated.filter(t => t.conference === conf);
+              if (!teams.length) return null;
+              return (
+                <div key={conf} style={s.dnqCol}>
+                  <div style={s.dnqColTitle}>{conf}ern Conference</div>
+                  {teams.map(t => (
+                    <div key={t.name} style={{
+                      ...s.dnqRow,
+                      ...(t.isUser ? { color: '#fbbf24', fontWeight: 700 } : {}),
+                    }} data-testid={`po-dnq-${t.name}`}>
+                      <span>#{t.confRank} {t.isUser && '★ '}{t.name}</span>
+                      <span style={{ color: '#94a3b8' }}>{t.wins}-{t.losses}</span>
+                    </div>
+                  ))}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {pbpGames.length > 0 && (
+        <div style={s.modalBg} data-testid="po-pbp-modal">
+          <div style={s.modal}>
+            <div style={s.modalHeader}>
+              <div>
+                <div style={{ color: '#fbbf24', fontSize: 12, textTransform: 'uppercase', letterSpacing: 1 }}>
+                  {pbpSeriesLabel}
+                </div>
+                <div style={{ fontSize: 18, fontWeight: 700, marginTop: 4 }}>
+                  Game {pbpIdx + 1} of {pbpGames.length}
+                </div>
+              </div>
+              <button onClick={() => setPbpGames([])} style={s.closeBtn}>Close</button>
+            </div>
+            <GameCast
+              plays={pbpGames[pbpIdx].plays}
+              teamA={pbpGames[pbpIdx].teamA} teamB={pbpGames[pbpIdx].teamB}
+              scoreA={pbpGames[pbpIdx].scoreA} scoreB={pbpGames[pbpIdx].scoreB}
+              teamStatsA={pbpGames[pbpIdx].teamStatsA} teamStatsB={pbpGames[pbpIdx].teamStatsB}
+              shots={pbpGames[pbpIdx].shots} winProbability={pbpGames[pbpIdx].winProbability}
+              leaders={pbpGames[pbpIdx].leaders}
+            />
+            <div style={s.modalFooter}>
+              <button disabled={pbpIdx === 0} onClick={() => setPbpIdx(i => Math.max(0, i - 1))} style={s.secondaryBtn}>
+                ← Prev Game
+              </button>
+              <button disabled={pbpIdx >= pbpGames.length - 1}
+                      onClick={() => setPbpIdx(i => Math.min(pbpGames.length - 1, i + 1))}
+                      style={s.primaryBtn}>
+                Next Game →
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -132,4 +242,16 @@ const s = {
   userSeries: { borderColor: '#60a5fa', background: '#0c4a6e' },
   doneSeries: { opacity: 0.85 },
   winnerLine: { marginTop: 6, fontSize: 11, color: '#10b981', fontWeight: 600 },
+  modalBg: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: 24, zIndex: 1000, overflowY: 'auto' },
+  modal: { background: '#0f172a', borderRadius: 12, padding: 20, maxWidth: 1100, width: '100%', border: '1px solid #1e3a8a' },
+  modalHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, paddingBottom: 12, borderBottom: '1px solid #334155' },
+  closeBtn: { padding: '8px 14px', background: '#7f1d1d', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600 },
+  modalFooter: { display: 'flex', justifyContent: 'space-between', gap: 12, marginTop: 16, paddingTop: 12, borderTop: '1px solid #334155' },
+  dnqPanel: { marginTop: 32, padding: 16, background: '#1e293b', borderRadius: 8, border: '1px dashed #475569' },
+  dnqTitle: { color: '#ef4444', fontSize: 13, textTransform: 'uppercase', letterSpacing: 1, margin: '0 0 12px' },
+  dnqGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 },
+  dnqCol: {},
+  dnqColTitle: { color: '#94a3b8', fontSize: 12, fontWeight: 700, marginBottom: 6 },
+  dnqRow: { display: 'flex', justifyContent: 'space-between', padding: '4px 0', fontSize: 13, color: '#cbd5e1', borderBottom: '1px solid #334155' },
+  missedBanner: { padding: 20, marginBottom: 20, background: 'linear-gradient(135deg, #7f1d1d, #450a0a)', borderRadius: 10, border: '2px solid #ef4444', textAlign: 'center', color: '#fff' },
 };

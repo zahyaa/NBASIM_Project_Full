@@ -29,6 +29,9 @@ const cpuTeamSchema = new mongoose.Schema({
   name: String,
   city: String,
   coach: String,
+  // Coach playbook rating 7–10. Higher = the CPU runs sharper sets and
+  // forces tougher matchups in simulation. Legacy difficulty enforced.
+  coachRating: { type: Number, default: 8 },
   conference: String,           // 'East' or 'West'
   division: String,             // 'Atlantic', 'Central', etc.
   marketTier: String,           // 'I', 'II', 'III'
@@ -110,6 +113,8 @@ const userSchema = new mongoose.Schema({
     type: [{
       gameNumber: Number,
       opponent: String,         // name of cpuTeam
+      gameDate: String,         // ISO date string (YYYY-MM-DD)
+      isHome: { type: Boolean, default: true },
       played: { type: Boolean, default: false },
       win: { type: Boolean, default: false },
       scoreUser: { type: Number, default: 0 },
@@ -238,6 +243,28 @@ const userSchema = new mongoose.Schema({
 
   // Favorited NBA players from the Players Bio page
   favoritePlayers: { type: [favoritePlayerSchema], default: [] },
+
+  // Multiplayer presence — updated by /api/auth/me (every poll). A user
+  // is considered "online" if lastSeenAt is within the last 2 minutes.
+  lastSeenAt: { type: Date, default: null },
+
+  // User-authored playbook plays (designed in /playbook page).
+  // Saved here so they show up in Team Management → Playbook tab too.
+  customPlays: {
+    type: [{
+      _id: false,
+      id: String,
+      name: { type: String, default: '' },
+      type: { type: String, default: 'Set' },     // Set | ATO | Iso | PnR | Inbound | Transition
+      formation: { type: String, default: '1-4 High' },
+      primary: { type: String, default: '' },     // playerId of primary scorer
+      secondary: { type: String, default: '' },   // playerId of secondary
+      screener: { type: String, default: '' },    // playerId of screener
+      description: { type: String, default: '' },
+      createdAt: { type: Date, default: Date.now },
+    }],
+    default: [],
+  },
 
   createdAt: { type: Date, default: Date.now },
 });

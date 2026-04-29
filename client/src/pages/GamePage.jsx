@@ -190,19 +190,29 @@ export default function GamePage() {
       {!simResult ? (
         <>
           <div style={styles.section}>
-            <h2 style={styles.sectionTitle}>Your Team ({user?.team?.name || 'My Team'})</h2>
+            <h2 style={styles.sectionTitle}>Your Starting 5 ({user?.team?.name || 'My Team'})</h2>
+            <p style={{ color: '#94a3b8', fontSize: 12, margin: '0 0 8px' }}>
+              Edit your lineup in <strong>Team Management → Lineup</strong>. The 5 players below are the active unit in every season game.
+            </p>
             <div style={styles.rosterGrid}>
-              {roster.slice(0, 5).map(p => (
-                <div key={p.playerId} style={styles.playerChip}>
-                  <span style={styles.chipRating}>{p.rating}</span>
-                  {p.firstName} {p.lastName}
-                  <span style={styles.chipPos}>{p.position}</span>
-                </div>
-              ))}
+              {(() => {
+                const starters = roster.filter(p => p.inLineup);
+                const bench = roster.filter(p => !p.inLineup).sort((a, b) => (b.rating || 0) - (a.rating || 0));
+                const lineup = [...starters, ...bench].slice(0, 5);
+                return lineup.map(p => (
+                  <div key={p.playerId} style={styles.playerChip}>
+                    <span style={styles.chipRating}>{p.rating}</span>
+                    {p.firstName} {p.lastName}
+                    <span style={styles.chipPos}>{p.position}</span>
+                    {p.inLineup && <span style={{ color: '#10b981', fontSize: 10, fontWeight: 700 }}>★</span>}
+                  </div>
+                ));
+              })()}
             </div>
           </div>
 
           {mode === 'season' ? (
+            <>
             <div style={styles.section} data-testid="season-panel">
               <h2 style={styles.sectionTitle}>Next Scheduled Game</h2>
               {scheduleInfo && scheduleInfo.schedule.length === 0 && (
@@ -228,6 +238,8 @@ export default function GamePage() {
                 <p style={{ color: '#22c55e' }}>Season complete! Visit the Standings page to advance.</p>
               ) : null}
             </div>
+            {scheduleInfo?.schedule?.length > 0 && <ScheduleCalendar schedule={scheduleInfo.schedule} />}
+            </>
           ) : (
             <>
               <div style={styles.section}>
@@ -324,4 +336,90 @@ const styles = {
   simBtn: { display: 'block', margin: '20px auto 0', padding: '14px 32px',
     borderRadius: 8, border: 'none', background: '#22c55e', color: '#fff',
     fontWeight: 700, cursor: 'pointer', fontSize: 16 },
+};
+
+// ESPN-style schedule calendar grouped by month. Highlights the next game,
+// shows home/away (vs / @), and dims completed results with W/L tag.
+function ScheduleCalendar({ schedule }) {
+  const nextIdx = schedule.findIndex(g => !g.played);
+  const groups = {};
+  for (const g of schedule) {
+    const key = g.gameDate
+      ? new Date(g.gameDate).toLocaleString('en-US', { month: 'long', year: 'numeric' })
+      : 'Schedule';
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(g);
+  }
+  return (
+    <div style={calStyles.section} data-testid="schedule-calendar">
+      <h2 style={calStyles.title}>📅 Schedule</h2>
+      <p style={calStyles.legend}>
+        <span style={{ color: '#fbbf24' }}>● Next</span>
+        {' · '}<span style={{ color: '#22c55e' }}>W</span>
+        {' / '}<span style={{ color: '#ef4444' }}>L</span>
+        {' · '}<span style={{ color: '#94a3b8' }}>vs = home, @ = away</span>
+      </p>
+      {Object.entries(groups).map(([month, games]) => (
+        <div key={month} style={{ marginBottom: 14 }}>
+          <h3 style={calStyles.month}>{month}</h3>
+          <div style={calStyles.grid}>
+            {games.map(g => {
+              const isNext = schedule[nextIdx] && g.gameNumber === schedule[nextIdx].gameNumber;
+              const day = g.gameDate ? new Date(g.gameDate).getDate() : g.gameNumber;
+              const dow = g.gameDate ? new Date(g.gameDate).toLocaleString('en-US', { weekday: 'short' }) : '';
+              return (
+                <div key={g.gameNumber} style={{
+                  ...calStyles.cell,
+                  ...(isNext ? calStyles.cellNext : {}),
+                  ...(g.played ? calStyles.cellPlayed : {}),
+                }} data-testid={`cal-game-${g.gameNumber}`}>
+                  <div style={calStyles.cellHead}>
+                    <span style={calStyles.day}>{day}</span>
+                    <span style={calStyles.dow}>{dow}</span>
+                  </div>
+                  <div style={calStyles.opp}>
+                    <span style={{ color: '#94a3b8' }}>{g.isHome ? 'vs' : '@'}</span>{' '}
+                    {g.opponent}
+                  </div>
+                  {g.played ? (
+                    <div style={{
+                      fontSize: 11, fontWeight: 700,
+                      color: g.win ? '#22c55e' : '#ef4444',
+                    }}>
+                      {g.win ? 'W' : 'L'} {g.scoreUser}-{g.scoreOpp}
+                    </div>
+                  ) : isNext ? (
+                    <div style={{ fontSize: 10, color: '#fbbf24', fontWeight: 700 }}>NEXT</div>
+                  ) : (
+                    <div style={{ fontSize: 10, color: '#64748b' }}>Game {g.gameNumber}</div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+const calStyles = {
+  section: {
+    background: '#1e293b', borderRadius: 12, padding: 20,
+    maxWidth: 1000, margin: '0 auto 16px',
+  },
+  title: { color: '#f97316', fontSize: 18, margin: '0 0 4px', fontWeight: 700 },
+  legend: { color: '#94a3b8', fontSize: 12, margin: '0 0 12px' },
+  month: { color: '#fbbf24', fontSize: 13, margin: '8px 0 6px', fontWeight: 700,
+    textTransform: 'uppercase', letterSpacing: 1 },
+  grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: 6 },
+  cell: { background: '#0f172a', borderRadius: 6, padding: '6px 8px',
+    border: '1px solid #1e3a8a', minHeight: 60 },
+  cellNext: { borderColor: '#fbbf24', background: 'rgba(251,191,36,0.08)' },
+  cellPlayed: { opacity: 0.65 },
+  cellHead: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' },
+  day: { color: '#e2e8f0', fontSize: 16, fontWeight: 700 },
+  dow: { color: '#64748b', fontSize: 10, textTransform: 'uppercase' },
+  opp: { color: '#e2e8f0', fontSize: 12, margin: '4px 0', fontWeight: 600,
+    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
 };

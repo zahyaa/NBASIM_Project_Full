@@ -4,24 +4,36 @@ A full-stack NBA basketball simulator with multiple game modes, built with the M
 
 ## 🎮 Game Modes
 
-- **🏆 Fantasy Draft** – Draft players from all NBA eras. Pick your city, coach, conference, and build your dream team of up to 12 players. Compete against CPU-generated opponents in full simulated games.
+- **🏆 Fantasy Draft** – Draft players from all NBA eras. Pick your city, coach, conference, and build your dream team of up to 15 players. Compete against 29 CPU-generated franchises in a full 82-game season.
 - **📅 Season Draft** – Draft from current-season NBA rosters for the 2025-26 season with active coaches.
-- **⚡ One on One** – Pick any two NBA players and run a 1v1 game to 21 with full play-by-play.
+- **📊 Standings & Career** – Run an authentic 82-game schedule. League / Conference / Division views with playoff seed badges, eliminated rows, and a red dashed cut-line at the 8-team mark.
+- **🎯 Playoffs** – NBA-style 4-round bracket (First Round → Conf Semis → Conf Finals → Finals, centered). Every series is best-of-7. User series can be replayed game-by-game with full play-by-play. Missed-the-playoffs banner skips you straight to next season.
+- **📋 Team Management** – Set your starting 5 (saves and applies for the rest of the season — full sims AND quick sims), sign free agents, propose 1-for-1 trades, track injuries and contracts, browse plays.
+- **📝 Playbook** – Design up to 25 custom plays (Set / ATO / Iso / PnR / Inbound / Transition) with formations and player roles. Surfaces inside Team Management → Playbook tab.
+- **🛍️ Store** – Spend tokens on training packs, signature gear, and recovery. Buy more tokens via PayPal or credit card (only the last 4 digits ever stored).
+- **⭐ All-Star Game** – Mid-season East vs West showcase.
+- **⚡ One on One** – Pick any two NBA players and run a 1v1 to 11/15/21 with full play-by-play. Popular matchups, random mode, and rematch.
 - **🔥 Blacktop** – Streetball mode. Choose 1v1 up to 5v5, set a target score (11, 15, or 21), and play half-court. Simulate instantly or watch play-by-play.
-- **📊 Players Bio** – Search any active NBA player with debounced auto-complete. View real headshots, current-season averages, advanced stats (TS%, eFG%, AST/TO), career history (last 5 seasons), and the last 10 game logs. Star players to favorite them, and use **Compare** mode to put two players side-by-side with the better stat highlighted in green.
-- **🌐 Multiplayer** – Online head-to-head (coming soon).
-- **⚙️ Settings** – Difficulty levels (Easy, Hard, Pro, All-Star, Legacy), reset game data, manage account.
+- **📖 Players Bio** – Search any active NBA player with debounced auto-complete. Real ESPN headshots, current-season averages, advanced stats (TS%, eFG%, AST/TO), 5-year career history, last 10 game logs, favorites, and side-by-side Compare mode.
+- **🌐 Multiplayer** – Head-to-head against real users. **Locked behind a completed fantasy draft + active premium subscription.** Three modes: **Public Match** (auto-pair with online subscribers, best-of-7), **Private Match** (share a 6-char code), and **Playoff Mode** (8-user bracket — Quarterfinals → Semifinals → Finals, every series best-of-7, *Play for the Ring*).
+- **📚 How to Play** – In-app guide with a 14-section walkthrough covering every mode, the fantasy economy, playoffs, multiplayer, difficulty curve, and pro tips.
+- **⚙️ Settings** – Difficulty (Easy / Pro / Hard / All-Star / Legacy) — the chosen tier actively shapes every CPU matchup (shot multiplier + score modifier). Reset game data, manage account.
 
 ## 🌐 Core Features
 
 - 🔐 **JWT Authentication** – Secure register/login with rate limiting
 - 🧠 **Player Ratings** – Heuristic ratings based on draft position and experience
-- 🎮 **Game Simulation** – Full 4-quarter + overtime engine with weighted scoring, rebounds, assists, turnovers
+- 🎮 **Game Simulation** – Full 4-quarter + overtime engine with weighted scoring, rebounds, assists, turnovers, shot chart, and win-probability timeline
+- 🎚️ **Difficulty-Aware CPU** – Settings difficulty (Easy → Legacy) tilts shot percentages and quick-sim score modifiers in every CPU matchup
 - 📺 **Animated GameCast** – Live play-by-play with scoreboard and speed controls (Slow/Normal/Fast/Turbo)
-- 🔍 **Player Search** – Search any active NBA player via the balldontlie API, with multi-token name matching (e.g. "Stephen Curry")
+- 🏠 **Floating Home Logo** – Custom basketball SVG button that returns to the main menu from any page
+- 🔍 **Player Search** – Search any active NBA player via the balldontlie API, with multi-token name matching
 - 🖼️ **Real Player Headshots** – ESPN search resolves player images on demand and caches them server-side for 24h
-- ⭐ **Favorites** – Star up to 50 players from the Bio page; pinned at the top of search results across sessions
-- 💾 **Persistent Progress** – Wins, losses, teams, favorites, and settings stored in MongoDB
+- ⭐ **Favorites & Compare** – Star up to 50 players; side-by-side Compare mode with auto-highlighted leaders
+- 🪙 **Token Economy** – Earn tokens through achievements/streaks; spend on training, gear, recovery; subscription weekly bonuses
+- 💳 **Subscriptions** – Free / Premium / GM-Elite tiers; PayPal or credit-card checkout (last-4 only ever stored)
+- 🟢 **Online Presence** – `lastSeenAt` heartbeat powers the multiplayer lobby's online list
+- 💾 **Persistent Progress** – Wins, losses, teams, lineups, custom plays, favorites, tokens, achievements, subscription state stored in MongoDB
 
 ## 🚀 Tech Stack
 
@@ -38,17 +50,25 @@ project-root/
 │   ├── src/
 │   │   ├── context/            # AuthContext
 │   │   ├── pages/              # MainMenu, DraftPage, SeasonDraftPage,
-│   │   │                       # GamePage, OneOnOnePage, BlacktopPage,
-│   │   │                       # PlayerBioPage, SettingsPage, MultiplayerPage
-│   │   └── components/         # GameCast
+│   │   │                       # GamePage, StandingsPage, PlayoffsPage,
+│   │   │                       # AllStarPage, TeamManagementPage,
+│   │   │                       # PlaybookPage, StorePage, SubscribePage,
+│   │   │                       # NewsPage, OneOnOnePage, BlacktopPage,
+│   │   │                       # PlayerBioPage, MultiplayerPage,
+│   │   │                       # HowToPlayPage, SettingsPage
+│   │   └── components/         # GameCast, HomeLogo (basketball SVG)
 │   └── public/
 ├── server/                     # Express backend
-│   ├── models/                 # User (incl. favoritePlayers), Game schemas
-│   ├── routes/                 # auth (incl. /favorites), draft, nba (incl.
-│   │                           # /players/:id/games), simulate, games, settings, upload
-│   ├── services/               # playerRating, playerPhoto (ESPN headshot
-│   │                           # resolver w/ 24h cache), nbaImages (team logos),
-│   │                           # simulation (5v5, 1v1, blacktop)
+│   ├── models/                 # User (favorites, customPlays, subscription,
+│   │                           # cpuRecords, lastSeenAt), Game schemas
+│   ├── routes/                 # auth, draft, nba, simulate, games, settings,
+│   │                           # season, playoffs, allstar, team, playbook,
+│   │                           # multiplayer, payments, upload
+│   ├── services/               # playerRating, playerPhoto (24h cache),
+│   │                           # nbaImages, simulation (5v5/1v1/blacktop +
+│   │                           # difficulty mods), fantasyGM (CPU teams,
+│   │                           # quickSimRecord, applyLineup), playoffs,
+│   │                           # news, fantasyGM achievements
 │   └── middleware/             # JWT auth middleware
 ├── e2e/                        # Playwright end-to-end tests
 ├── render.yaml                 # Single-service Render Blueprint
@@ -152,6 +172,48 @@ Visit [http://localhost:3000](http://localhost:3000)
 |--------|-------|-------------|
 | GET | `/api/games` | Saved game history |
 | POST | `/api/games/save` | Save a game result |
+
+### Season & Playoffs
+| Method | Route | Description |
+|--------|-------|-------------|
+| POST | `/api/season/start` | Generate the 82-game schedule |
+| POST | `/api/season/play-next` | Sim user's next game with full play-by-play |
+| POST | `/api/season/simulate-rest` | Quick-sim every remaining regular-season game |
+| GET | `/api/season/standings` | League standings (lazy CPU 82-game top-up) |
+| POST | `/api/season/advance` | Advance to the next season (skip-playoffs supported) |
+| GET | `/api/playoffs/state` | Bracket + eliminated teams list |
+| POST | `/api/playoffs/start` | Build the 16-team bracket |
+| POST | `/api/playoffs/play-next` | Sim the next playoff game (with PBP for user series) |
+
+### Team & Playbook
+| Method | Route | Description |
+|--------|-------|-------------|
+| POST | `/api/team/lineup` | Save the user's starting 5 (applies for the season) |
+| POST | `/api/team/sign` | Sign a free agent |
+| POST | `/api/team/trade` | Propose a 1-for-1 trade with a CPU team |
+| GET | `/api/playbook` | List custom plays |
+| POST | `/api/playbook` | Create a custom play (max 25) |
+| PUT | `/api/playbook/:id` | Update a play |
+| DELETE | `/api/playbook/:id` | Delete a play |
+
+### Multiplayer
+| Method | Route | Description |
+|--------|-------|-------------|
+| GET | `/api/multiplayer/status` | Gate check + active match |
+| GET | `/api/multiplayer/online` | Online subscribers (lastSeenAt within 2 min) |
+| POST | `/api/multiplayer/public` | Find or create a public best-of-7 match |
+| POST | `/api/multiplayer/private/create` | Generate a 6-char invite code |
+| POST | `/api/multiplayer/private/join` | Join with a code |
+| POST | `/api/multiplayer/playoff/create` | Open an 8-user playoff lobby |
+| POST | `/api/multiplayer/playoff/join` | Join a playoff lobby |
+| GET | `/api/multiplayer/state/:id` | Poll match state |
+| POST | `/api/multiplayer/play/:id` | Sim the next game / series step |
+| POST | `/api/multiplayer/leave/:id` | Leave / forfeit |
+
+### Payments
+| Method | Route | Description |
+|--------|-------|-------------|
+| POST | `/api/payments` | Buy tokens or a subscription (PayPal / credit card last-4) |
 
 ---
 

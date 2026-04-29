@@ -17,6 +17,8 @@ const {
   quickSimRecord,
   awardRewards,
   shuffle,
+  cpuFrontOfficeTick,
+  applyLineup,
 } = require('../services/fantasyGM');
 const {
   gameRecap,
@@ -39,6 +41,55 @@ function getCpuRecord(user, name) {
     rec = user.cpuRecords[user.cpuRecords.length - 1];
   }
   return rec;
+}
+
+// Top up every CPU team's record to exactly SEASON_GAMES by simulating
+// extra CPU-vs-CPU games. Without this, CPU teams play far fewer than 82
+// games (the user's per-tick CPU batch only reaches a subset each game),
+// which lets the user finish 4th at 20-62 — the standings looked broken
+// because the rest of the league literally hadn't played 82 games.
+function topUpCpuRecordsTo82(user) {
+  const teams = user.cpuTeams;
+  if (!teams.length) return;
+  // Build a quick lookup by name for finding opponents.
+  const byName = new Map(teams.map(t => [t.name, t]));
+  // Sanity loop \u2014 cap iterations to avoid runaway in pathological data.
+  let safety = teams.length * SEASON_GAMES * 4;
+  let progress = true;
+  while (progress && safety-- > 0) {
+    progress = false;
+    // Find teams still under 82 games.
+    const under = teams
+      .map(t => ({ t, rec: getCpuRecord(user, t.name) }))
+      .filter(x => x.rec.wins + x.rec.losses < SEASON_GAMES);
+    if (!under.length) break;
+    // Shuffle so opponents vary; pair the most-behind team with another
+    // under-82 team (or any team if none).
+    const shuffled = shuffle(under);
+    for (const { t: a, rec: ra } of shuffled) {
+      if (ra.wins + ra.losses >= SEASON_GAMES) continue;
+      // Prefer another under-82 team as opponent so we don't push anyone over.
+      let opp = shuffled.find(x => x.t.name !== a.name && x.rec.wins + x.rec.losses < SEASON_GAMES);
+      if (!opp) {
+        // Fall back to any other team \u2014 still increments only `a`'s record
+        // when the opponent is already at 82 to keep totals exact.
+        const otherName = teams.find(tt => tt.name !== a.name)?.name;
+        if (!otherName) break;
+        opp = { t: byName.get(otherName), rec: getCpuRecord(user, otherName) };
+      }
+      const r = quickSimRecord(a, opp.t);
+      const oppAtCap = opp.rec.wins + opp.rec.losses >= SEASON_GAMES;
+      if (r.winner === 'A') {
+        ra.wins += 1;
+        if (!oppAtCap) opp.rec.losses += 1;
+      } else {
+        ra.losses += 1;
+        if (!oppAtCap) opp.rec.wins += 1;
+      }
+      progress = true;
+    }
+  }
+  user.markModified('cpuRecords');
 }
 
 function requireDraftCompleted(user, res) {
@@ -81,6 +132,13 @@ function ensureCpuRosters(user, minPlayers = 15) {
   let modified = false;
   for (const t of user.cpuTeams) {
     if (!Array.isArray(t.players)) t.players = [];
+    // Backfill coachRating for legacy users whose CPU teams predate the
+    // coach-playbook system. Random 7\u201310 with most at 8\u20139.
+    if (t.coachRating == null) {
+      const r = Math.random();
+      t.coachRating = r < 0.15 ? 10 : r < 0.55 ? 9 : r < 0.9 ? 8 : 7;
+      modified = true;
+    }
     while (t.players.length < minPlayers) {
       const i = t.players.length + 1;
       t.players.push({
@@ -106,7 +164,11 @@ router.post('/start', auth, async (req, res) => {
     if (!requireDraftCompleted(user, res)) return;
 
     ensureCpuRosters(user);
-    user.schedule = generateSchedule({ cpuTeams: user.cpuTeams, games: SEASON_GAMES });
+    user.schedule = generateSchedule({
+      cpuTeams: user.cpuTeams,
+      userTeam: { conference: user.conference, division: user.team?.division },
+      games: SEASON_GAMES,
+    });
     user.seasonWins = 0;
     user.seasonLosses = 0;
     // Reset CPU records for the new season.
@@ -139,9 +201,12 @@ router.post('/play-next', auth, async (req, res) => {
     if (!cpu) return res.status(500).json({ error: `Scheduled opponent "${game.opponent}" not found` });
 
     // Real simulation with full play-by-play / stats / shots / leaders.
+    // applyLineup() puts the user's chosen starting 5 at the front so they
+    // are the active unit in the simulation.
     const result = simulateGame(
-      { name: user.team.name, players: user.team.players },
-      { name: cpu.name, players: cpu.players }
+      applyLineup({ name: user.team.name, players: user.team.players, coachRating: 7 }),
+      { name: cpu.name, players: cpu.players, coachRating: cpu.coachRating },
+      { difficulty: user.difficulty, userSide: 'A' }
     );
 
     const userWon = result.winner === user.team.name;
@@ -194,6 +259,17 @@ router.post('/play-next', auth, async (req, res) => {
     // Token + achievement rewards.
     const rewards = awardRewards(user);
 
+    // CPU front office develops their rosters — makes the league harder
+    // as the season progresses.
+    cpuFrontOfficeTick(user);
+
+    // If this was the user's 82nd (final) game, top up every CPU team to
+    // 82 games so the final standings reflect a complete league season.
+    const seasonFinished = user.schedule.length && user.schedule.every(g => g.played);
+    if (seasonFinished) {
+      topUpCpuRecordsTo82(user);
+    }
+
     await user.save();
     res.json({
       ...result,
@@ -215,6 +291,21 @@ router.get('/standings', auth, async (req, res) => {
     const user = await User.findById(req.userId);
     if (!user) return res.status(404).json({ error: 'User not found' });
     if (!requireDraftCompleted(user, res)) return;
+
+    // If the user has finished their 82 games but the CPU records don't all
+    // sum to 82 (legacy data from before the top-up was wired in), fix it
+    // now so the standings actually make sense.
+    const userDone = user.schedule.length && user.schedule.every(g => g.played);
+    if (userDone) {
+      const allFull = user.cpuTeams.every(t => {
+        const r = (user.cpuRecords || []).find(rr => rr.name === t.name);
+        return r && (r.wins + r.losses) >= SEASON_GAMES;
+      });
+      if (!allFull) {
+        topUpCpuRecordsTo82(user);
+        await user.save();
+      }
+    }
 
     const rows = [{
       name: user.team.name || 'My Team',
@@ -262,7 +353,7 @@ router.post('/simulate-rest', auth, async (req, res) => {
     for (const game of remaining) {
       const cpu = user.cpuTeams.find(t => t.name === game.opponent);
       if (!cpu) continue;
-      const r = quickSimRecord(user.team, cpu);
+      const r = quickSimRecord(user.team, cpu, undefined, { difficulty: user.difficulty, userSide: 'A' });
       const userWon = r.winner === 'A';
       game.played = true;
       game.win = userWon;
@@ -292,8 +383,16 @@ router.post('/simulate-rest', auth, async (req, res) => {
         });
       }
       played += 1;
+      // CPU front office tick every few games during a season sim so
+      // weaker teams gradually improve and the user faces stiffer
+      // competition late in the year.
+      if (played % 5 === 0) cpuFrontOfficeTick(user);
     }
     user.markModified('schedule');
+
+    // Top up every CPU team to exactly 82 games so the standings actually
+    // make sense (everyone played a full season, just like the real NBA).
+    topUpCpuRecordsTo82(user);
 
     // Drop trade rumors once mid-season if not already.
     if (user.lastTradeRumorSeason !== user.seasonNumber) {
@@ -410,7 +509,10 @@ router.post('/advance', auth, async (req, res) => {
     user.season += 1;
     user.seasonWins = 0;
     user.seasonLosses = 0;
-    user.schedule = generateSchedule({ cpuTeams: user.cpuTeams });
+    user.schedule = generateSchedule({
+      cpuTeams: user.cpuTeams,
+      userTeam: { conference: user.conference, division: user.team?.division },
+    });
     user.cpuRecords = user.cpuTeams.map(t => ({ name: t.name, wins: 0, losses: 0 }));
 
     const rewards = awardRewards(user);

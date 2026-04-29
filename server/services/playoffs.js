@@ -8,7 +8,8 @@
 // CPU-vs-CPU regular-season games so the bracket plays out instantly when
 // the user clicks "Simulate Playoffs".
 
-const { quickSimRecord, teamAvgRating } = require('./fantasyGM');
+const { quickSimRecord, teamAvgRating, applyLineup } = require('./fantasyGM');
+const { simulateGame } = require('./simulation');
 
 const ROUND_NAMES = ['First Round', 'Conference Semifinals', 'Conference Finals', 'NBA Finals'];
 
@@ -78,17 +79,46 @@ function buildBracket(user) {
 
 // Play a best-of-7 series. Returns the mutated `series` with winner +
 // individual game results. quickSimRecord operates on { players: [...] }.
-function playSeries(series, user, rng = Math.random) {
-  if (series.winner) return series;
+// When `fullPlayByPlay` is true, runs the full simulateGame() per game and
+// returns the rich game data array via the second return value (NOT stored
+// on the series doc to keep the user record small).
+function playSeries(series, user, rng = Math.random, opts = {}) {
+  const fullPbp = !!opts.fullPlayByPlay;
+  const games = [];
+  if (series.winner) return { series, games };
   const teamA = teamObject(user, series.teamA.name) || { name: series.teamA.name, players: [] };
   const teamB = teamObject(user, series.teamB.name) || { name: series.teamB.name, players: [] };
+  // Carry coachRating into the sim payload so playoff games respect it.
+  const cpuA = user.cpuTeams.find(t => t.name === series.teamA.name);
+  const cpuB = user.cpuTeams.find(t => t.name === series.teamB.name);
+  if (cpuA) teamA.coachRating = cpuA.coachRating;
+  if (cpuB) teamB.coachRating = cpuB.coachRating;
+  // If the user's team is in this series, tilt the sim by user.difficulty.
+  const userSide = teamA.name === user.team?.name ? 'A'
+    : teamB.name === user.team?.name ? 'B' : null;
+  const simOpts = { difficulty: user.difficulty, userSide };
   while (series.winsA < 4 && series.winsB < 4) {
-    const r = quickSimRecord(teamA, teamB, rng);
-    series.results.push({ scoreA: r.scoreA, scoreB: r.scoreB, winner: r.winner === 'A' ? series.teamA.name : series.teamB.name });
-    if (r.winner === 'A') series.winsA += 1; else series.winsB += 1;
+    if (fullPbp && teamA.players.length && teamB.players.length) {
+      // Honor the user's chosen starting 5 (inLineup) when their team plays.
+      const aLineup = teamA.name === user.team.name ? applyLineup(teamA) : teamA;
+      const bLineup = teamB.name === user.team.name ? applyLineup(teamB) : teamB;
+      const g = simulateGame(aLineup, bLineup, simOpts);
+      const winnerSide = g.scoreA > g.scoreB ? 'A' : 'B';
+      series.results.push({
+        scoreA: g.scoreA,
+        scoreB: g.scoreB,
+        winner: winnerSide === 'A' ? series.teamA.name : series.teamB.name,
+      });
+      games.push(g);
+      if (winnerSide === 'A') series.winsA += 1; else series.winsB += 1;
+    } else {
+      const r = quickSimRecord(teamA, teamB, rng, simOpts);
+      series.results.push({ scoreA: r.scoreA, scoreB: r.scoreB, winner: r.winner === 'A' ? series.teamA.name : series.teamB.name });
+      if (r.winner === 'A') series.winsA += 1; else series.winsB += 1;
+    }
   }
   series.winner = series.winsA === 4 ? series.teamA.name : series.teamB.name;
-  return series;
+  return { series, games };
 }
 
 // Advance the bracket: build next round based on winners of the current

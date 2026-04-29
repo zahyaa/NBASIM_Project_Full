@@ -35,6 +35,23 @@ router.get('/state', auth, async (req, res) => {
     const user = await User.findById(req.userId);
     if (!user) return res.status(404).json({ error: 'User not found' });
     const seasonComplete = !!user.schedule?.length && user.schedule.every(g => g.played);
+
+    // Build the "Did Not Qualify" list \u2014 teams ranked 9th or worse in their
+    // conference are cut from the bracket. Mirror the sort buildBracket()
+    // uses so this stays consistent with who actually plays.
+    const allTeams = [
+      { name: user.team?.name || 'My Team', conference: user.conference, wins: user.seasonWins, losses: user.seasonLosses, isUser: true },
+      ...user.cpuTeams.map(t => {
+        const rec = (user.cpuRecords || []).find(r => r.name === t.name) || { wins: 0, losses: 0 };
+        return { name: t.name, conference: t.conference, wins: rec.wins, losses: rec.losses, isUser: false };
+      }),
+    ];
+    const sortFn = (a, b) => (b.wins - a.wins) || (a.losses - b.losses);
+    const eliminated = ['East', 'West'].flatMap(conf =>
+      allTeams.filter(t => t.conference === conf).sort(sortFn).slice(8)
+        .map((t, i) => ({ ...t, confRank: i + 9 }))
+    );
+
     res.json({
       locked: !seasonComplete,
       started: !!user.playoffs?.started,
@@ -43,6 +60,7 @@ router.get('/state', auth, async (req, res) => {
       rounds: user.playoffs?.rounds || [],
       champion: user.playoffs?.champion || '',
       runnerUp: user.playoffs?.runnerUp || '',
+      eliminated,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -103,7 +121,10 @@ router.post('/play-next', auth, async (req, res) => {
     }
     if (!next) return res.status(400).json({ error: 'No more series to play' });
 
-    playSeries(next, user);
+    // If the user's team is in this series, run full play-by-play so the
+    // player can re-watch every game on the GameCast component.
+    const userInSeries = next.teamA?.name === user.team.name || next.teamB?.name === user.team.name;
+    const { games: pbpGames } = playSeries(next, user, Math.random, { fullPlayByPlay: userInSeries });
     advanceBracket(user.playoffs.rounds, user);
 
     pushNews(user, {
@@ -137,6 +158,9 @@ router.post('/play-next', auth, async (req, res) => {
       completed: user.playoffs.completed,
       champion: user.playoffs.champion,
       runnerUp: user.playoffs.runnerUp,
+      // When the user's team played, this is an array of full simulateGame
+      // outputs (one per game) so the client can render GameCast playback.
+      playByPlay: userInSeries ? pbpGames : [],
       tokensAwarded: rewards.tokensAwarded,
       newAchievements: rewards.newAchievements,
     });

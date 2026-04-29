@@ -30,6 +30,15 @@ const MODES = [
     requiresDraftStarted: true,
   },
   {
+    key: 'playbook',
+    title: 'Playbook',
+    desc: "Design custom plays for your roster. Saved straight to Coach's Playbook.",
+    icon: '\u{1F4DD}',
+    path: '/playbook',
+    color: '#f472b6',
+    requiresDraftStarted: true,
+  },
+  {
     key: 'standings',
     title: 'Standings & Career',
     desc: 'Run an 82-game season. View league standings. 5-year career arc.',
@@ -65,10 +74,19 @@ const MODES = [
   {
     key: 'multiplayer',
     title: 'Multiplayer',
-    desc: 'Under construction. Coming soon!',
-    icon: '\u{1F6A7}',
+    desc: 'Public, private & playoff matches against real GMs. Subscription required.',
+    icon: '\u{1F310}',
     path: '/multiplayer',
-    color: '#64748b',
+    color: '#06b6d4',
+    requiresDraftStarted: true,
+  },
+  {
+    key: 'how-to-play',
+    title: 'How to Play',
+    desc: 'Full guide — modes, fantasy economy, playoffs, multiplayer, tips.',
+    icon: '\u{1F4DA}',
+    path: '/how-to-play',
+    color: '#60a5fa',
   },
   {
     key: 'settings',

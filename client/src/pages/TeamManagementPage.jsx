@@ -11,6 +11,7 @@ export default function TeamManagementPage() {
   const [cpuTeams, setCpuTeams] = useState([]);
   const [error, setError] = useState('');
   const [tab, setTab] = useState('lineup'); // lineup | sign | trade | injuries | contracts
+  const [customPlays, setCustomPlays] = useState([]);
 
   const refresh = useCallback(async () => {
     setError('');
@@ -20,6 +21,15 @@ export default function TeamManagementPage() {
       if (!res.ok) throw new Error(data.error);
       setTeam(data.team);
       setCpuTeams(data.cpuTeams || []);
+      // Pull user-authored plays from /api/playbook so the Coach's Playbook
+      // tab shows custom plays designed in /playbook alongside the auto-generated ones.
+      try {
+        const pbRes = await fetch('/api/playbook', { headers: { Authorization: `Bearer ${token}` } });
+        if (pbRes.ok) {
+          const pb = await pbRes.json();
+          setCustomPlays(pb.plays || []);
+        }
+      } catch (_) { /* non-fatal */ }
       const meRes = await fetch('/api/auth/me', { headers: { Authorization: `Bearer ${token}` } });
       setUser(await meRes.json());
     } catch (err) {
@@ -33,6 +43,7 @@ export default function TeamManagementPage() {
 
   // ---- Lineup ----
   const [starters, setStarters] = useState(new Set());
+  const [lineupToast, setLineupToast] = useState('');
   useEffect(() => {
     setStarters(new Set(players.filter(p => p.inLineup).map(p => p.playerId)));
   }, [team]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -47,7 +58,7 @@ export default function TeamManagementPage() {
   };
 
   const saveLineup = async () => {
-    setError('');
+    setError(''); setLineupToast('');
     try {
       const res = await fetch('/api/team/lineup', {
         method: 'POST',
@@ -57,6 +68,8 @@ export default function TeamManagementPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       setTeam(data.team);
+      setLineupToast(`✅ Lineup saved · ${starters.size} starter${starters.size === 1 ? '' : 's'} will play every remaining game this season.`);
+      setTimeout(() => setLineupToast(''), 5000);
     } catch (err) { setError(err.message); }
   };
 
@@ -170,7 +183,41 @@ export default function TeamManagementPage() {
     { k: 'trade', label: 'Trade' },
     { k: 'injuries', label: 'Injuries' },
     { k: 'contracts', label: 'Contracts' },
+    { k: 'playbook', label: "Coach's Playbook" },
   ];
+
+  // Generate 10 playbooks tailored to the current roster. Each play picks
+  // real players from the team for the relevant role (PG handler, top
+  // scorer, best rebounder, sharpest shooter, etc.).
+  const playbook = (() => {
+    if (!players.length) return [];
+    const byRating = [...players].sort((a, b) => (b.rating || 0) - (a.rating || 0));
+    const byPos = (pos) => players.filter(p => (p.position || '').toUpperCase().startsWith(pos)).sort((a, b) => (b.rating || 0) - (a.rating || 0));
+    const guards = [...byPos('G'), ...byPos('PG'), ...byPos('SG')];
+    const wings = [...byPos('SF'), ...byPos('SG'), ...byPos('F')];
+    const bigs = [...byPos('C'), ...byPos('PF'), ...byPos('F')];
+    const fb = (i) => byRating[Math.min(i, byRating.length - 1)] || byRating[0];
+    const pg = guards[0] || fb(1);
+    const sg = guards[1] || wings[0] || fb(2);
+    const sf = wings[0] || fb(2);
+    const pf = bigs[1] || bigs[0] || fb(3);
+    const c = bigs[0] || fb(4);
+    const star = byRating[0];
+    const sixth = byRating[5] || byRating[byRating.length - 1];
+    const nm = (p) => p ? `${p.firstName} ${p.lastName}` : '—';
+    return [
+      { name: 'Horns Flare', type: 'Offense', desc: `Double high-post set with ${nm(pf)} and ${nm(c)}; ${nm(pg)} rejects the pick and flares ${nm(sg)} for an open three.` },
+      { name: 'Pistol Action', type: 'Offense', desc: `${nm(pg)} dribbles into a side pick-and-roll with ${nm(c)}, ${nm(sf)} lifts to the wing for the kick-out.` },
+      { name: 'Iverson Cut', type: 'Offense', desc: `${nm(star)} runs over staggered screens from ${nm(pf)} and ${nm(c)} into a mid-range pull-up.` },
+      { name: 'Spain P&R', type: 'Offense', desc: `${nm(c)} screens for ${nm(pg)} while ${nm(sf)} back-screens ${nm(c)} — stack defense and get a lob or open shooter.` },
+      { name: 'Hammer Set', type: 'Offense', desc: `${nm(sg)} drives baseline; ${nm(sf)} sets a back-screen on ${nm(pf)}'s defender for a corner three.` },
+      { name: 'Floppy', type: 'Offense', desc: `${nm(sg)} chooses a side off ${nm(c)} or ${nm(pf)} screens — read the defense, take the open look.` },
+      { name: 'Drag Flow', type: 'Transition', desc: `${nm(pg)} pushes; ${nm(c)} drag-screens at the arc, ${nm(sg)} fills the strong-side corner for a quick three.` },
+      { name: 'Pack Line D', type: 'Defense', desc: `Sag off non-shooters, force ${nm(star)}'s match-up baseline; ${nm(c)} anchors the paint as help.` },
+      { name: 'Switch 1–5', type: 'Defense', desc: `Switch every screen with ${nm(sf)} and ${nm(pf)} on the perimeter; ${nm(c)} drops only on rim-running 5s.` },
+      { name: 'Bench Spark', type: 'Rotation', desc: `Bring ${nm(sixth)} as the 6th man with the second unit — lead ball-handler, free up ${nm(star)} to rest before the 4th.` },
+    ];
+  })();
 
   const tradeCpu = cpuTeams.find(t => t.name === tradeCpuTeam);
 
@@ -205,10 +252,20 @@ export default function TeamManagementPage() {
 
       {tab === 'lineup' && (
         <div style={s.panel}>
-          <p style={s.help}>Pick up to 5 starters. ({starters.size}/5)</p>
+          <p style={s.help}>
+            Pick up to 5 starters. ({starters.size}/5) — your selection is saved
+            and applied automatically to every remaining game this season
+            (regular season, playoffs, exhibitions).
+          </p>
+          {lineupToast && (
+            <div data-testid="lineup-toast"
+                 style={{ padding: 10, background: '#065f46', borderRadius: 6, marginBottom: 12, color: '#fff', fontWeight: 600 }}>
+              {lineupToast}
+            </div>
+          )}
           <ul style={s.list}>
             {players.map(p => (
-              <li key={p.playerId} style={s.row}>
+              <li key={p.playerId} style={{ ...s.row, ...(starters.has(p.playerId) ? { background: '#0c4a6e', borderRadius: 6 } : {}) }}>
                 <input
                   type="checkbox"
                   data-testid={`starter-${p.playerId}`}
@@ -217,6 +274,7 @@ export default function TeamManagementPage() {
                 />
                 <span style={s.name}>{p.firstName} {p.lastName}</span>
                 <span style={s.meta}>{p.position} · {p.rating}</span>
+                {starters.has(p.playerId) && <span style={{ background: '#10b981', color: '#fff', borderRadius: 4, padding: '2px 8px', fontSize: 10, fontWeight: 700 }}>STARTER</span>}
                 {p.injured && <span style={s.injTag}>INJ</span>}
               </li>
             ))}
@@ -356,6 +414,76 @@ export default function TeamManagementPage() {
               </li>
             ))}
           </ul>
+        </div>
+      )}
+      {tab === 'playbook' && (
+        <div style={s.panel} data-testid="playbook-panel">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <p style={{ ...s.help, margin: 0 }}>
+              10 plays generated from your current roster, plus any custom plays you design.
+            </p>
+            <button onClick={() => navigate('/playbook')}
+                    style={{ padding: '8px 14px', background: '#f472b6', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}
+                    data-testid="open-playbook-page">
+              📋 Design Custom Plays →
+            </button>
+          </div>
+
+          {customPlays.length > 0 && (
+            <div style={{ marginBottom: 16 }}>
+              <h3 style={{ color: '#f472b6', fontSize: 13, textTransform: 'uppercase', letterSpacing: 1, margin: '0 0 8px' }}>
+                Your Custom Plays ({customPlays.length})
+              </h3>
+              <ul style={s.list}>
+                {customPlays.map((p, i) => {
+                  const nameOf = id => {
+                    const pl = (team.players || []).find(x => String(x.playerId) === String(id));
+                    return pl ? `${pl.firstName} ${pl.lastName}` : '—';
+                  };
+                  return (
+                    <li key={p.id} style={{ ...s.row, alignItems: 'flex-start', flexDirection: 'column', gap: 4 }}
+                        data-testid={`custom-play-${i}`}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%' }}>
+                        <span style={{ background: '#f472b6', color: '#fff', borderRadius: 4, padding: '2px 8px', fontSize: 11, fontWeight: 700 }}>
+                          CUSTOM
+                        </span>
+                        <span style={{ ...s.name, color: '#f472b6' }}>{p.name}</span>
+                        <span style={s.meta}>{p.type} · {p.formation}</span>
+                      </div>
+                      <div style={{ color: '#cbd5e1', fontSize: 13, lineHeight: 1.5, paddingLeft: 36 }}>
+                        Primary: <strong>{nameOf(p.primary)}</strong>
+                        {' · '}Secondary: <strong>{nameOf(p.secondary)}</strong>
+                        {' · '}Screener: <strong>{nameOf(p.screener)}</strong>
+                        {p.description && <div style={{ marginTop: 4 }}>{p.description}</div>}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
+
+          <h3 style={{ color: '#10b981', fontSize: 13, textTransform: 'uppercase', letterSpacing: 1, margin: '12px 0 8px' }}>
+            Auto-Generated Plays
+          </h3>
+          <ul style={s.list}>
+            {playbook.map((p, i) => (
+              <li key={p.name} style={{ ...s.row, alignItems: 'flex-start', flexDirection: 'column', gap: 4 }}
+                  data-testid={`play-${i}`}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%' }}>
+                  <span style={{ background: '#10b981', color: '#fff', borderRadius: 4, padding: '2px 8px', fontSize: 11, fontWeight: 700 }}>
+                    {String(i + 1).padStart(2, '0')}
+                  </span>
+                  <span style={{ ...s.name, color: '#10b981' }}>{p.name}</span>
+                  <span style={s.meta}>{p.type}</span>
+                </div>
+                <div style={{ color: '#cbd5e1', fontSize: 13, lineHeight: 1.5, paddingLeft: 36 }}>
+                  {p.desc}
+                </div>
+              </li>
+            ))}
+          </ul>
+          {!playbook.length && <p style={s.help}>Draft a roster first to generate your playbook.</p>}
         </div>
       )}
     </div>

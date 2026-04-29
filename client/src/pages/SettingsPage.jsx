@@ -70,11 +70,11 @@ export default function SettingsPage() {
   };
 
   const difficulties = [
-    { key: 'easy', label: 'Easy', desc: 'Relaxed gameplay, boosted stats', color: '#22c55e' },
-    { key: 'hard', label: 'Hard', desc: 'Tighter margins, smarter CPU', color: '#f97316' },
-    { key: 'pro', label: 'Pro', desc: 'Balanced and competitive', color: '#3b82f6' },
-    { key: 'allstar', label: 'All-Star', desc: 'Elite difficulty, no mercy', color: '#a855f7' },
-    { key: 'legacy', label: 'Legacy', desc: 'Maximum challenge, legend mode', color: '#ef4444' },
+    { key: 'easy',    label: 'Easy',     desc: 'CPU shoots 15% worse · You get a +3 score boost', color: '#22c55e' },
+    { key: 'pro',     label: 'Pro',      desc: 'Balanced — neutral baseline',                     color: '#3b82f6' },
+    { key: 'hard',    label: 'Hard',     desc: 'CPU shoots 8% better · +6 score advantage',        color: '#f97316' },
+    { key: 'allstar', label: 'All-Star', desc: 'CPU shoots 15% better · +11 score advantage',      color: '#a855f7' },
+    { key: 'legacy',  label: 'Legacy',   desc: 'CPU shoots 22% better · +16 score advantage',      color: '#ef4444' },
   ];
 
   const handleLogoUpload = async (e) => {
@@ -111,6 +111,10 @@ export default function SettingsPage() {
 
       <div style={s.card}>
         <h2 style={s.sectionTitle}>Difficulty</h2>
+        <p style={{ color: '#94a3b8', fontSize: 13, margin: '0 0 12px' }}>
+          Applies to every CPU you face — full play-by-play, season sims, and playoff series.
+          Multiplayer (user vs user) is unaffected.
+        </p>
         <div style={s.diffGrid}>
           {difficulties.map(d => (
             <button key={d.key} onClick={() => setDifficulty(d.key)}

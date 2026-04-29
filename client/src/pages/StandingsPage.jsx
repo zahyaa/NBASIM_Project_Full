@@ -103,6 +103,24 @@ export default function StandingsPage() {
     return standings.standings;
   }, [standings, view]);
 
+  // Compute the playoff seed (1–8) for every team in their own conference.
+  // Teams ranked 9th or worse in their conference are cut from the bracket
+  // — same logic the backend uses in services/playoffs.js buildBracket().
+  const seedByName = useMemo(() => {
+    const map = {};
+    if (!standings) return map;
+    const sortFn = (a, b) => (b.wins - a.wins) || (a.losses - b.losses);
+    ['East', 'West'].forEach(conf => {
+      const ranked = standings.standings
+        .filter(r => r.conference === conf)
+        .sort(sortFn);
+      ranked.forEach((row, i) => {
+        map[row.name] = { seed: i < 8 ? i + 1 : null, confRank: i + 1 };
+      });
+    });
+    return map;
+  }, [standings]);
+
   if (!user?.draftStarted || !user?.draftCompleted) {
     return (
       <div style={styles.container} data-testid="standings-page-locked">
@@ -207,6 +225,7 @@ export default function StandingsPage() {
                 <th style={styles.th}>L</th>
                 <th style={styles.th}>PCT</th>
                 <th style={styles.th}>GB</th>
+                <th style={styles.th}>PO</th>
               </tr>
             </thead>
             <tbody>
@@ -216,10 +235,19 @@ export default function StandingsPage() {
                 const leader = filteredStandings[0];
                 const gb = i === 0 ? '—'
                   : (((leader.wins - row.wins) + (row.losses - leader.losses)) / 2).toFixed(1);
+                const seedInfo = seedByName[row.name] || {};
+                const inPlayoffs = !!seedInfo.seed;
+                // In conference view, draw a red cut line after the 8th team
+                // so the user can see exactly who survives and who's eliminated.
+                const showCutLine = view === 'conference' && i === 7 && filteredStandings.length > 8;
                 return (
-                  <tr key={row.name}
+                  <React.Fragment key={row.name}>
+                  <tr
                       data-testid={row.isUser ? 'standings-user-row' : `standings-row-${row.name}`}
-                      style={row.isUser ? styles.userRow : (i % 2 ? styles.altRow : null)}>
+                      style={{
+                        ...(row.isUser ? styles.userRow : (i % 2 ? styles.altRow : null)),
+                        ...((!inPlayoffs && view !== 'division') ? { opacity: 0.55 } : {}),
+                      }}>
                     <td style={styles.td}>{i + 1}</td>
                     <td style={styles.td}>
                       {row.isUser && <span style={styles.youBadge}>YOU</span>}
@@ -231,7 +259,20 @@ export default function StandingsPage() {
                     <td style={styles.td}>{row.losses}</td>
                     <td style={styles.td}>{pct}</td>
                     <td style={styles.td}>{gb}</td>
+                    <td style={styles.td}>
+                      {inPlayoffs
+                        ? <span style={styles.seedPill} data-testid={`po-seed-${row.name}`}>#{seedInfo.seed}</span>
+                        : <span style={styles.outPill} data-testid={`po-out-${row.name}`}>OUT</span>}
+                    </td>
                   </tr>
+                  {showCutLine && (
+                    <tr data-testid="playoff-cut-line">
+                      <td colSpan={9} style={styles.cutLine}>
+                        ——— PLAYOFF CUT LINE · Top 8 advance ———
+                      </td>
+                    </tr>
+                  )}
+                  </React.Fragment>
                 );
               })}
             </tbody>
@@ -330,4 +371,11 @@ const styles = {
   userRow: { background: '#1e3a8a', color: '#fff', fontWeight: 700 },
   youBadge: { background: '#f97316', color: '#fff', borderRadius: 4,
     padding: '2px 6px', fontSize: 10, marginRight: 6 },
+  seedPill: { background: '#10b981', color: '#0f172a', borderRadius: 4,
+    padding: '2px 8px', fontSize: 11, fontWeight: 700 },
+  outPill: { background: '#475569', color: '#cbd5e1', borderRadius: 4,
+    padding: '2px 8px', fontSize: 11, fontWeight: 700 },
+  cutLine: { textAlign: 'center', padding: '8px 0', color: '#ef4444',
+    fontSize: 11, fontWeight: 700, letterSpacing: 1, background: '#1a0a0a',
+    borderTop: '2px dashed #ef4444', borderBottom: '2px dashed #ef4444' },
 };

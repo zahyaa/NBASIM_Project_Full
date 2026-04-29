@@ -35,7 +35,9 @@ async function fetchSeasonAverages(playerIds, season = CURRENT_SEASON) {
       );
       for (const sa of data.data || []) map[sa.player_id] = sa;
     } catch (err) {
-      console.warn('[nba] season_averages chunk failed:', err.response?.status || err.message);
+      // Silenced — balldontlie returns 400 for many historical chunks and
+      // the spam OOMs the dev server. Errors are non-fatal; we just skip
+      // the chunk and continue.
     }
   }
   return map;

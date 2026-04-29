@@ -3,6 +3,7 @@ const auth = require('../middleware/auth');
 const User = require('../models/User');
 const Game = require('../models/Game');
 const { simulateGame, simulate1v1, simulateBlacktop } = require('../services/simulation');
+const { applyLineup } = require('../services/fantasyGM');
 const router = express.Router();
 
 // POST /api/simulate — run a game between user's team and a computer opponent
@@ -30,16 +31,16 @@ router.post('/', auth, async (req, res) => {
       rating: Math.min(99, Math.max(1, Number(p.rating) || 50)),
     }));
 
-    const teamA = {
+    const teamA = applyLineup({
       name: user.team.name || `${user.username}'s Team`,
       players: user.team.players,
-    };
+    });
     const teamB = {
       name: String(opponentName).slice(0, 100),
       players: sanitizedOpponents,
     };
 
-    const result = simulateGame(teamA, teamB);
+    const result = simulateGame(teamA, teamB, { difficulty: user.difficulty, userSide: 'A' });
 
     // Save game scoped to the user
     const game = new Game({

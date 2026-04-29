@@ -14,6 +14,9 @@ import StorePage from './pages/StorePage';
 import TeamManagementPage from './pages/TeamManagementPage';
 import StandingsPage from './pages/StandingsPage';
 import PlayoffsPage from './pages/PlayoffsPage';
+import PlaybookPage from './pages/PlaybookPage';
+import HowToPlayPage from './pages/HowToPlayPage';
+import HomeLogo from './components/HomeLogo';
 import NewsPage from './pages/NewsPage';
 import AllStarPage from './pages/AllStarPage';
 import SubscribePage from './pages/SubscribePage';
@@ -58,6 +61,7 @@ function AppRoutes() {
             <>
               <Link to="/store" style={{ color: '#eab308', textDecoration: 'none', fontWeight: 600, fontSize: 14 }}>Store ({user.tokens || 0})</Link>
               <Link to="/team" style={{ color: '#10b981', textDecoration: 'none', fontWeight: 600, fontSize: 14 }}>Team</Link>
+              <Link to="/playbook" style={{ color: '#f472b6', textDecoration: 'none', fontWeight: 600, fontSize: 14 }}>Playbook</Link>
             </>
           )}
           {user?.draftCompleted && (
@@ -83,6 +87,7 @@ function AppRoutes() {
         <Route path="/draft" element={<ProtectedRoute><DraftPage /></ProtectedRoute>} />
         <Route path="/store" element={<ProtectedRoute><DraftStartedGate><StorePage /></DraftStartedGate></ProtectedRoute>} />
         <Route path="/team" element={<ProtectedRoute><DraftStartedGate><TeamManagementPage /></DraftStartedGate></ProtectedRoute>} />
+        <Route path="/playbook" element={<ProtectedRoute><DraftStartedGate><PlaybookPage /></DraftStartedGate></ProtectedRoute>} />
         <Route path="/game" element={<ProtectedRoute><DraftGate><GamePage /></DraftGate></ProtectedRoute>} />
         <Route path="/standings" element={<ProtectedRoute><DraftGate><StandingsPage /></DraftGate></ProtectedRoute>} />
         <Route path="/playoffs" element={<ProtectedRoute><DraftGate><PlayoffsPage /></DraftGate></ProtectedRoute>} />
@@ -94,8 +99,10 @@ function AppRoutes() {
         <Route path="/players" element={<ProtectedRoute><PlayerBioPage /></ProtectedRoute>} />
         <Route path="/multiplayer" element={<ProtectedRoute><MultiplayerPage /></ProtectedRoute>} />
         <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
+        <Route path="/how-to-play" element={<ProtectedRoute><HowToPlayPage /></ProtectedRoute>} />
         <Route path="*" element={<Navigate to={token ? '/menu' : '/login'} replace />} />
       </Routes>
+      {token && <HomeLogo />}
     </>
   );
 }
