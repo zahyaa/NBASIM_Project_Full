@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 
 /* ────────────────────────────────────────────
    ESPN-Style GameCast
@@ -171,11 +171,19 @@ function TeamStats({ statsA, statsB, teamA, teamB }) {
 // ─── MAIN COMPONENT ──────────────────────
 
 export default function GameCast({ plays, teamA, teamB, scoreA, scoreB, onFinished,
-  logoA, logoB, teamStatsA, teamStatsB, shots, winProbability, leaders }) {
+  logoA, logoB, teamStatsA, teamStatsB, shots, winProbability, leaders,
+  playCallA, playCallB, timeoutsA = 6, timeoutsB = 6 }) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(true);
   const [speed, setSpeed] = useState(800);
   const [activeTab, setActiveTab] = useState('playbyplay');
+  // Mid-game timeouts (item 2). 6 per coach. The user's "Call Timeout"
+  // button decrements toA, pauses the playback briefly, and inserts a
+  // banner into the visible feed. CPU timeouts auto-trigger when the user
+  // pulls ahead by 10+ so both sides actually use them.
+  const [toA, setToA] = useState(timeoutsA);
+  const [toB, setToB] = useState(timeoutsB);
+  const [timeoutBanner, setTimeoutBanner] = useState(null);
   const timerRef = useRef(null);
   const listRef = useRef(null);
 
@@ -219,6 +227,34 @@ export default function GameCast({ plays, teamA, teamB, scoreA, scoreB, onFinish
   const fastForward = () => { setCurrentIndex(plays.length - 1); setIsPlaying(false); };
   const progress = plays.length > 0 ? ((currentIndex + 1) / plays.length) * 100 : 0;
 
+  // Call a timeout: pause briefly, decrement counter, show banner.
+  const callTimeout = useCallback((side) => {
+    if (side === 'A' && toA <= 0) return;
+    if (side === 'B' && toB <= 0) return;
+    if (side === 'A') setToA(n => n - 1); else setToB(n => n - 1);
+    setIsPlaying(false);
+    const teamName = side === 'A' ? teamA : teamB;
+    setTimeoutBanner(`💢 ${teamName} calls timeout! (${(side === 'A' ? toA : toB) - 1} left)`);
+    setTimeout(() => {
+      setTimeoutBanner(null);
+      setIsPlaying(true);
+    }, 1800);
+  }, [toA, toB, teamA, teamB]);
+
+  // CPU auto-timeout: when the user (team A) pulls ahead by 10+ for the
+  // first time, the CPU coach burns one. Caps at one per quarter so it
+  // doesn't spam.
+  const lastCpuToQuarter = useRef(null);
+  useEffect(() => {
+    if (!currentPlay) return;
+    const lead = (currentPlay.scoreA ?? 0) - (currentPlay.scoreB ?? 0);
+    const q = currentPlay.quarter;
+    if (lead >= 10 && toB > 0 && lastCpuToQuarter.current !== q) {
+      lastCpuToQuarter.current = q;
+      callTimeout('B');
+    }
+  }, [currentIndex, currentPlay, toB, callTimeout]);
+
   const tabs = [
     { key: 'playbyplay', label: 'Play-by-Play' },
     { key: 'stats', label: 'Team Stats' },
@@ -237,6 +273,46 @@ export default function GameCast({ plays, teamA, teamB, scoreA, scoreB, onFinish
         quarterScoresA={finished ? quarterScores?.a : null}
         quarterScoresB={finished ? quarterScores?.b : null}
       />
+
+      {/* Coach's-call header (item 2). Shows each team's offensive +
+          defensive scheme and remaining timeouts. The "Call Timeout"
+          button only enables for team A (the user) and only while not
+          finished — CPU side auto-burns timeouts when they fall behind. */}
+      {(playCallA || playCallB) && (
+        <div style={S.callHeader} data-testid="call-header">
+          <div style={S.callTeam}>
+            <div style={{ ...S.callTeamName, color: '#f97316' }}>{teamA}</div>
+            <div style={S.callRow}>
+              <span style={S.callBadge}>OFF: {playCallA?.offensive || 'Free Play'}</span>
+              <span style={{ ...S.callBadge, background: '#0e7490' }}>DEF: {playCallA?.defensive || 'No Call'}</span>
+            </div>
+            <button
+              onClick={() => callTimeout('A')}
+              disabled={toA <= 0 || finished}
+              data-testid="call-timeout-a"
+              style={{ ...S.toBtn, opacity: (toA <= 0 || finished) ? 0.4 : 1 }}
+            >
+              ⏱ Call Timeout ({toA})
+            </button>
+          </div>
+          <div style={S.callTeam}>
+            <div style={{ ...S.callTeamName, color: '#22d3ee' }}>{teamB}</div>
+            <div style={S.callRow}>
+              <span style={S.callBadge}>OFF: {playCallB?.offensive || '—'}</span>
+              <span style={{ ...S.callBadge, background: '#0e7490' }}>DEF: {playCallB?.defensive || '—'}</span>
+            </div>
+            <div style={{ ...S.toBtn, background: '#1e293b', cursor: 'default' }} data-testid="cpu-timeouts">
+              CPU TOs: {toB}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {timeoutBanner && (
+        <div style={S.timeoutBanner} data-testid="timeout-banner">
+          {timeoutBanner}
+        </div>
+      )}
 
       <div style={S.progressBar}><div style={{ ...S.progressFill, width: `${progress}%` }} /></div>
 
@@ -307,6 +383,18 @@ export default function GameCast({ plays, teamA, teamB, scoreA, scoreB, onFinish
 
 const S = {
   container: { background: '#0f172a', borderRadius: 12, padding: 20, maxWidth: 860, margin: '0 auto' },
+  callHeader: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, padding: '12px 14px',
+    background: '#0b1220', border: '1px solid #1e3a5f', borderRadius: 10, margin: '8px 0' },
+  callTeam: { display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-start' },
+  callTeamName: { fontSize: 13, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0.5 },
+  callRow: { display: 'flex', gap: 6, flexWrap: 'wrap' },
+  callBadge: { background: '#7c2d12', color: '#fed7aa', padding: '3px 8px', borderRadius: 5,
+    fontSize: 11, fontWeight: 700 },
+  toBtn: { background: '#dc2626', color: '#fff', border: 'none', borderRadius: 6,
+    padding: '6px 12px', fontWeight: 700, fontSize: 12, cursor: 'pointer' },
+  timeoutBanner: { background: '#fbbf24', color: '#1f2937', padding: '8px 12px',
+    borderRadius: 8, textAlign: 'center', margin: '6px 0', fontWeight: 800,
+    animation: 'fadeSlideIn 0.4s ease-out' },
   scoreboard: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'linear-gradient(135deg, #1e293b, #0f172a)', borderRadius: 12, padding: '20px 24px', border: '1px solid #334155', marginBottom: 4 },
   sbTeam: { textAlign: 'center', flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 },
   sbLogo: { width: 48, height: 48, objectFit: 'contain' },

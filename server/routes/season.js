@@ -20,6 +20,23 @@ const {
   cpuFrontOfficeTick,
   applyLineup,
 } = require('../services/fantasyGM');
+
+// Mid-game play-call helpers (item 2). The user can pass a {offensive,
+// defensive} pair via the play-next request body. CPU coach picks random
+// named schemes so both sides always run a play.
+const CPU_OFF = ['Horns Set', 'Pick & Roll', 'Spain Action', 'Princeton Offense', 'Triangle', 'Motion Strong', 'Iso Heavy', 'Hammer Action'];
+const CPU_DEF = ['Man-to-Man', 'Switch 1-5', '2-3 Zone', '3-2 Zone', 'Drop Coverage', 'Half-Court Trap', 'Full-Court Press', 'Pack the Paint'];
+function sanitizePlayCall(pc) {
+  if (!pc || typeof pc !== 'object') return {};
+  const trim = (s) => (typeof s === 'string' && s.trim() ? s.trim().slice(0, 60) : null);
+  return { offensive: trim(pc.offensive), defensive: trim(pc.defensive) };
+}
+function randomCpuPlayCall() {
+  return {
+    offensive: CPU_OFF[Math.floor(Math.random() * CPU_OFF.length)],
+    defensive: CPU_DEF[Math.floor(Math.random() * CPU_DEF.length)],
+  };
+}
 const {
   gameRecap,
   generateTradeRumors,
@@ -203,10 +220,17 @@ router.post('/play-next', auth, async (req, res) => {
     // Real simulation with full play-by-play / stats / shots / leaders.
     // applyLineup() puts the user's chosen starting 5 at the front so they
     // are the active unit in the simulation.
+    const userPlayCall = sanitizePlayCall(req.body && req.body.playCall);
+    const cpuPlayCall = randomCpuPlayCall();
     const result = simulateGame(
       applyLineup({ name: user.team.name, players: user.team.players, coachRating: 7 }),
       { name: cpu.name, players: cpu.players, coachRating: cpu.coachRating },
-      { difficulty: user.difficulty, userSide: 'A' }
+      {
+        difficulty: user.difficulty,
+        userSide: 'A',
+        playCallA: userPlayCall,
+        playCallB: cpuPlayCall,
+      }
     );
 
     const userWon = result.winner === user.team.name;

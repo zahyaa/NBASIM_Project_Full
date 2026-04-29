@@ -6,6 +6,34 @@ const { simulateGame, simulate1v1, simulateBlacktop } = require('../services/sim
 const { applyLineup } = require('../services/fantasyGM');
 const router = express.Router();
 
+// Coach play-call helpers (item 2). User-supplied play call is sanitized to
+// a flat { offensive, defensive } shape — both fields optional strings of
+// up to 60 chars. CPU randomly picks named NBA schemes so both sides run a
+// play even when the user defaults to "Free Play".
+const CPU_OFFENSIVE_PLAYS = [
+  'Horns Set', 'Pick & Roll', 'Spain Action', 'Princeton Offense',
+  'Triangle', 'Motion Strong', 'Iso Heavy', 'Hammer Action',
+];
+const CPU_DEFENSIVE_PLAYS = [
+  'Man-to-Man', 'Switch 1-5', '2-3 Zone', '3-2 Zone',
+  'Drop Coverage', 'Half-Court Trap', 'Full-Court Press', 'Pack the Paint',
+];
+
+function sanitizePlayCall(pc) {
+  if (!pc || typeof pc !== 'object') return {};
+  const trim = (s) => (typeof s === 'string' && s.trim() ? s.trim().slice(0, 60) : null);
+  return {
+    offensive: trim(pc.offensive),
+    defensive: trim(pc.defensive),
+  };
+}
+
+function randomCpuPlayCall() {
+  const o = CPU_OFFENSIVE_PLAYS[Math.floor(Math.random() * CPU_OFFENSIVE_PLAYS.length)];
+  const d = CPU_DEFENSIVE_PLAYS[Math.floor(Math.random() * CPU_DEFENSIVE_PLAYS.length)];
+  return { offensive: o, defensive: d };
+}
+
 // POST /api/simulate — run a game between user's team and a computer opponent
 router.post('/', auth, async (req, res) => {
   try {
@@ -18,7 +46,7 @@ router.post('/', auth, async (req, res) => {
       return res.status(400).json({ error: 'Need at least 5 players' });
     }
 
-    const { opponentName, opponentPlayers } = req.body;
+    const { opponentName, opponentPlayers, playCall } = req.body;
     if (!opponentName || !Array.isArray(opponentPlayers) || opponentPlayers.length < 5) {
       return res.status(400).json({ error: 'Opponent team data required (name + at least 5 players)' });
     }
@@ -40,7 +68,18 @@ router.post('/', auth, async (req, res) => {
       players: sanitizedOpponents,
     };
 
-    const result = simulateGame(teamA, teamB, { difficulty: user.difficulty, userSide: 'A' });
+    // User's pre-game play call (item 2). Defaults to none. CPU coach
+    // randomly picks an offensive + defensive scheme so both sides are
+    // running plays.
+    const userPlayCall = sanitizePlayCall(playCall);
+    const cpuPlayCall = randomCpuPlayCall();
+
+    const result = simulateGame(teamA, teamB, {
+      difficulty: user.difficulty,
+      userSide: 'A',
+      playCallA: userPlayCall,
+      playCallB: cpuPlayCall,
+    });
 
     // Save game scoped to the user
     const game = new Game({

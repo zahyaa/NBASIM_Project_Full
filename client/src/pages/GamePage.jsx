@@ -20,6 +20,14 @@ export default function GamePage() {
   const [scheduleInfo, setScheduleInfo] = useState(null);
   const [rewardToast, setRewardToast] = useState(null);
   const [standings, setStandings] = useState(null);
+  // Mid-game play calling (item 2). Loaded from /api/playbook +
+  // /api/defensive-playbook so the user can pick from their saved plays
+  // before tipoff. Names get sent to the simulator and shown as badges
+  // during the play-by-play.
+  const [offPlays, setOffPlays] = useState([]);
+  const [defPlays, setDefPlays] = useState([]);
+  const [pickedOffense, setPickedOffense] = useState('');
+  const [pickedDefense, setPickedDefense] = useState('');
 
   const roster = user?.team?.players || [];
 
@@ -30,10 +38,12 @@ export default function GamePage() {
 
   const loadGameData = useCallback(async () => {
     try {
-      const [teamRes, schedRes, standRes] = await Promise.all([
+      const [teamRes, schedRes, standRes, pbRes, dpbRes] = await Promise.all([
         fetch('/api/team', { headers: { Authorization: `Bearer ${token}` } }),
         fetch('/api/season/schedule', { headers: { Authorization: `Bearer ${token}` } }),
         fetch('/api/season/standings', { headers: { Authorization: `Bearer ${token}` } }),
+        fetch('/api/playbook', { headers: { Authorization: `Bearer ${token}` } }),
+        fetch('/api/defensive-playbook', { headers: { Authorization: `Bearer ${token}` } }),
       ]);
       if (teamRes.ok) {
         const data = await teamRes.json();
@@ -44,6 +54,14 @@ export default function GamePage() {
         setScheduleInfo(data);
       }
       if (standRes.ok) setStandings(await standRes.json());
+      if (pbRes.ok) {
+        const data = await pbRes.json();
+        setOffPlays(data.plays || []);
+      }
+      if (dpbRes.ok) {
+        const data = await dpbRes.json();
+        setDefPlays(data.plays || []);
+      }
     } catch (err) { setError(err.message); }
   }, [token]);
 
@@ -77,7 +95,10 @@ export default function GamePage() {
     try {
       const res = await fetch('/api/season/play-next', {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          playCall: { offensive: pickedOffense || null, defensive: pickedDefense || null },
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to play game');
@@ -128,6 +149,7 @@ export default function GamePage() {
             playerId: p.playerId, firstName: p.firstName, lastName: p.lastName,
             position: p.position, rating: p.rating, stats: p.stats,
           })),
+          playCall: { offensive: pickedOffense || null, defensive: pickedDefense || null },
         }),
       });
       const data = await res.json();
@@ -211,6 +233,60 @@ export default function GamePage() {
             </div>
           </div>
 
+          {/* Pre-game play call (item 2). User picks one offensive scheme +
+              one defensive scheme. ±8% shot conversion swing in the engine.
+              Empty = "Free Play" (no boost). Schemes are pulled from the
+              user's saved playbooks plus a small fallback list so a user
+              who hasn't visited the playbook still has options. */}
+          <div style={styles.section} data-testid="play-call-panel">
+            <h2 style={styles.sectionTitle}>Coach's Call <span style={{ fontSize: 12, color: '#94a3b8', fontWeight: 500 }}>(±8% shot conversion)</span></h2>
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', justifyContent: 'center' }}>
+              <label style={styles.callLabel}>
+                <span style={{ color: '#f97316' }}>Offensive Play</span>
+                <select
+                  data-testid="off-play-select"
+                  value={pickedOffense}
+                  onChange={e => setPickedOffense(e.target.value)}
+                  style={styles.callSelect}
+                >
+                  <option value="">— Free Play —</option>
+                  {offPlays.map(p => <option key={p.id || p.name} value={p.name}>{p.name}{p.formation ? ` · ${p.formation}` : ''}</option>)}
+                  {offPlays.length === 0 && (
+                    <>
+                      <option value="Pick & Roll">Pick & Roll</option>
+                      <option value="Horns Set">Horns Set</option>
+                      <option value="Spain Action">Spain Action</option>
+                      <option value="Iso Heavy">Iso Heavy</option>
+                    </>
+                  )}
+                </select>
+              </label>
+              <label style={styles.callLabel}>
+                <span style={{ color: '#06b6d4' }}>Defensive Play</span>
+                <select
+                  data-testid="def-play-select"
+                  value={pickedDefense}
+                  onChange={e => setPickedDefense(e.target.value)}
+                  style={styles.callSelect}
+                >
+                  <option value="">— No Call —</option>
+                  {defPlays.map(p => <option key={p.id || p.name} value={p.name}>{p.name}{p.scheme ? ` · ${p.scheme}` : ''}</option>)}
+                  {defPlays.length === 0 && (
+                    <>
+                      <option value="Man-to-Man">Man-to-Man</option>
+                      <option value="2-3 Zone">2-3 Zone</option>
+                      <option value="Switch 1-5">Switch 1-5</option>
+                      <option value="Pack the Paint">Pack the Paint</option>
+                    </>
+                  )}
+                </select>
+              </label>
+            </div>
+            <p style={{ color: '#64748b', fontSize: 11, margin: '10px 0 0', textAlign: 'center' }}>
+              Build your own plays in <strong>Playbook</strong> &amp; <strong>Defensive Playbook</strong>.
+            </p>
+          </div>
+
           {mode === 'season' ? (
             <>
             <div style={styles.section} data-testid="season-panel">
@@ -288,6 +364,8 @@ export default function GamePage() {
             teamStatsA={simResult.teamStatsA} teamStatsB={simResult.teamStatsB}
             shots={simResult.shots} winProbability={simResult.winProbability}
             leaders={simResult.leaders}
+            playCallA={simResult.playCallA} playCallB={simResult.playCallB}
+            timeoutsA={simResult.timeoutsA ?? 6} timeoutsB={simResult.timeoutsB ?? 6}
           />
           <div style={{ textAlign: 'center', marginTop: 20 }}>
             <button data-testid="play-again-btn" onClick={() => { setSimResult(null); setRewardToast(null); }} style={styles.simBtn}>
@@ -336,6 +414,10 @@ const styles = {
   simBtn: { display: 'block', margin: '20px auto 0', padding: '14px 32px',
     borderRadius: 8, border: 'none', background: '#22c55e', color: '#fff',
     fontWeight: 700, cursor: 'pointer', fontSize: 16 },
+  callLabel: { display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12,
+    fontWeight: 700, minWidth: 220 },
+  callSelect: { background: '#0f172a', color: '#e2e8f0', border: '1px solid #334155',
+    borderRadius: 6, padding: '8px 10px', fontSize: 13 },
 };
 
 // ESPN-style schedule calendar grouped by month. Highlights the next game,

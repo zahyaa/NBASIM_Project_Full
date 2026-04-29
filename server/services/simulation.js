@@ -77,6 +77,18 @@ function simulateGame(teamA, teamB, opts = {}) {
   const coachBoostA = (coachA - 7) * 0.015;
   const coachBoostB = (coachB - 7) * 0.015;
 
+  // Mid-game play calling (item 2). Each side may pass an offensive +
+  // defensive scheme via opts.playCallA / opts.playCallB. The offensive
+  // call boosts THAT team's shot conversion; the defensive call drops the
+  // OPPONENT's shot conversion. ±8% per call (aggressive setting).
+  const playCallA = opts.playCallA || {};
+  const playCallB = opts.playCallB || {};
+  const PLAY_BOOST = 0.08;
+  const offBoostA = playCallA.offensive ? PLAY_BOOST : 0;
+  const offBoostB = playCallB.offensive ? PLAY_BOOST : 0;
+  const defDropA  = playCallB.defensive ? PLAY_BOOST : 0; // B's defense hurts A
+  const defDropB  = playCallA.defensive ? PLAY_BOOST : 0; // A's defense hurts B
+
   // Difficulty multipliers applied per side. userSide ('A'|'B') marks which
   // team is the human; the other side gets the CPU mod. When userSide is
   // omitted (CPU vs CPU, or user vs user) both sides stay at 1.0.
@@ -120,9 +132,12 @@ function simulateGame(teamA, teamB, opts = {}) {
       pBox.min += Math.round(elapsed / 60 * 10) / 10;
 
       const sideMul = isTeamA ? shotMulA : shotMulB;
-      // Clamp to a sane range so legacy + elite players can't push above ~0.85
-      // and miss-bucket thresholds remain reachable at every difficulty.
-      const rawChance = (0.35 + (player.rating / 99) * 0.25 + (isTeamA ? coachBoostA : coachBoostB)) * sideMul;
+      // Play-call adjustment: offensive scheme boosts your conversion;
+      // opponent's defensive scheme drops it. Both apply if active.
+      const playAdj = isTeamA
+        ? (offBoostA - defDropA)
+        : (offBoostB - defDropB);
+      const rawChance = (0.35 + (player.rating / 99) * 0.25 + (isTeamA ? coachBoostA : coachBoostB) + playAdj) * sideMul;
       const shotChance = Math.max(0.25, Math.min(0.85, rawChance));
       // Made-shot ceiling: scoring outcomes occupy [0, made]; misses, steals,
       // assists, blocks, turnovers, fouls split the remaining (1 - made)
@@ -294,7 +309,10 @@ function simulateGame(teamA, teamB, opts = {}) {
       if (!player) continue;
       const pBox = box[player.playerId];
 
-      const rawChance = (0.35 + (player.rating / 99) * 0.25 + (isTeamA ? coachBoostA : coachBoostB))
+      const playAdj = isTeamA
+        ? (offBoostA - defDropA)
+        : (offBoostB - defDropB);
+      const rawChance = (0.35 + (player.rating / 99) * 0.25 + (isTeamA ? coachBoostA : coachBoostB) + playAdj)
         * (isTeamA ? shotMulA : shotMulB);
       const shotChance = Math.max(0.25, Math.min(0.85, rawChance));
       const roll = Math.random();
@@ -359,6 +377,17 @@ function simulateGame(teamA, teamB, opts = {}) {
     leaders,
     starPlayer: allPlayers[0],
     winner: scoreATot > scoreBTot ? teamA.name : teamB.name,
+    // Play-call & timeout metadata for the live game UI (item 2).
+    playCallA: {
+      offensive: playCallA.offensive || null,
+      defensive: playCallA.defensive || null,
+    },
+    playCallB: {
+      offensive: playCallB.offensive || null,
+      defensive: playCallB.defensive || null,
+    },
+    timeoutsA: typeof opts.timeoutsA === 'number' ? opts.timeoutsA : 6,
+    timeoutsB: typeof opts.timeoutsB === 'number' ? opts.timeoutsB : 6,
   };
 }
 
