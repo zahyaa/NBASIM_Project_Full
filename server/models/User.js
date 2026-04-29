@@ -218,9 +218,14 @@ const userSchema = new mongoose.Schema({
       bundleId: String,        // bundle/plan identifier
       amountUSD: Number,
       tokensAwarded: { type: Number, default: 0 },
-      method: String,          // 'paypal' | 'credit-card'
+      method: String,          // 'paypal' | 'stripe' | 'credit-card'
       paypalOrderId: String,
+      paypalCaptureId: String,
+      stripePaymentIntentId: String,
       cardLast4: String,       // last 4 only — NEVER full PAN
+      refunded: { type: Boolean, default: false },
+      refundedAt: Date,
+      refundId: String,
       createdAt: { type: Date, default: Date.now },
     }],
     default: [],

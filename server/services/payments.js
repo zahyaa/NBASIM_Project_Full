@@ -1,16 +1,22 @@
 // Payment integration helpers.
 //
-// PayPal is the preferred provider. We support two flows:
-//   1. PayPal — client gets an order id from /api/payments/paypal/create,
+// Two providers, both PCI-friendly (server never sees raw card numbers):
+//   1. Stripe — client tokenizes the card via Stripe.js / Elements and sends
+//      a paymentMethodId. Server creates a PaymentIntent off-session and the
+//      client confirms it with the publishable key.
+//   2. PayPal — client gets an order id from /api/payments/paypal/create,
 //      approves on PayPal, then calls /api/payments/paypal/capture.
-//   2. Credit card — server takes the user's card, validates it locally
-//      (Luhn check + expiry), strips everything except the last 4, and
-//      records the purchase. NO full PAN is ever stored or logged.
 //
-// For local development without PayPal credentials we fall back to
-// "sandbox mode" which mints a fake order id and treats capture as a
-// no-op success. Set PAYPAL_CLIENT_ID + PAYPAL_SECRET in .env to enable
-// the real PayPal REST API integration (api-m.paypal.com / sandbox).
+// The legacy /api/payments/credit-card endpoint is now deprecated and only
+// remains for tests. It rejects in production. All real card flows go
+// through Stripe.
+//
+// Set in .env (production):
+//   STRIPE_SECRET_KEY=sk_live_...
+//   STRIPE_PUBLISHABLE_KEY=pk_live_...
+//   PAYPAL_CLIENT_ID=...
+//   PAYPAL_SECRET=...
+//   PAYPAL_API_BASE=https://api-m.paypal.com   (optional override)
 
 const axios = require('axios');
 
@@ -18,6 +24,24 @@ const PAYPAL_BASE = process.env.PAYPAL_API_BASE
   || (process.env.NODE_ENV === 'production'
       ? 'https://api-m.paypal.com'
       : 'https://api-m.sandbox.paypal.com');
+
+let _stripe = null;
+function stripe() {
+  if (_stripe) return _stripe;
+  if (!process.env.STRIPE_SECRET_KEY) return null;
+  // Lazy-require so tests without the env var don't hit the constructor.
+  const Stripe = require('stripe');
+  _stripe = Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2024-06-20' });
+  return _stripe;
+}
+
+function stripeConfigured() {
+  return !!process.env.STRIPE_SECRET_KEY;
+}
+
+function stripePublishableKey() {
+  return process.env.STRIPE_PUBLISHABLE_KEY || '';
+}
 
 function paypalConfigured() {
   return !!(process.env.PAYPAL_CLIENT_ID && process.env.PAYPAL_SECRET);
@@ -40,15 +64,14 @@ async function paypalAccessToken() {
   return data.access_token;
 }
 
-// Create a PayPal order. Returns { orderId, approveUrl, sandbox }.
-// Falls back to a fake sandbox order if PayPal isn't configured so the
-// rest of the flow still works in development.
+// Create a PayPal order. Returns { orderId, approveUrl }.
+// When PayPal credentials are absent we mint a LOCAL-* order id so the dev
+// flow still works without exposing a "sandbox" flag to the client.
 async function createPaypalOrder({ amountUSD, description }) {
   if (!paypalConfigured()) {
     return {
       orderId: `LOCAL-${Date.now()}-${Math.floor(Math.random() * 1000000)}`,
       approveUrl: null,
-      sandbox: true,
     };
   }
   const token = await paypalAccessToken();
@@ -64,14 +87,14 @@ async function createPaypalOrder({ amountUSD, description }) {
     { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, timeout: 8000 }
   );
   const approve = (data.links || []).find(l => l.rel === 'approve');
-  return { orderId: data.id, approveUrl: approve?.href || null, sandbox: false };
+  return { orderId: data.id, approveUrl: approve?.href || null };
 }
 
-// Capture an approved PayPal order. Returns { captured: true, status }.
+// Capture an approved PayPal order. Returns { captured, status, captureId }.
 // Fake-sandbox orders (LOCAL-*) always capture successfully.
 async function capturePaypalOrder(orderId) {
   if (String(orderId).startsWith('LOCAL-') || !paypalConfigured()) {
-    return { captured: true, status: 'COMPLETED', sandbox: true };
+    return { captured: true, status: 'COMPLETED', captureId: null };
   }
   const token = await paypalAccessToken();
   const { data } = await axios.post(
@@ -79,7 +102,8 @@ async function capturePaypalOrder(orderId) {
     {},
     { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, timeout: 8000 }
   );
-  return { captured: data.status === 'COMPLETED', status: data.status, sandbox: false };
+  const captureId = data?.purchase_units?.[0]?.payments?.captures?.[0]?.id || null;
+  return { captured: data.status === 'COMPLETED', status: data.status, captureId };
 }
 
 // Luhn check used as a basic sanity check on the card number. We never
@@ -110,9 +134,66 @@ function validateCard({ number, expMonth, expYear, cvc }) {
   return { ok: true, last4 };
 }
 
+// ---- Stripe ---------------------------------------------------------------
+
+// Refund a captured PayPal order. Returns { refunded, refundId, status }.
+async function refundPaypalCapture(captureId, amountUSD) {
+  if (!paypalConfigured() || !captureId || String(captureId).startsWith('LOCAL-')) {
+    return { refunded: false, status: 'NOT_CONFIGURED' };
+  }
+  const token = await paypalAccessToken();
+  const body = amountUSD
+    ? { amount: { value: Number(amountUSD).toFixed(2), currency_code: 'USD' } }
+    : {};
+  const { data } = await axios.post(
+    `${PAYPAL_BASE}/v2/payments/captures/${captureId}/refund`,
+    body,
+    { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, timeout: 8000 }
+  );
+  return { refunded: data.status === 'COMPLETED', refundId: data.id, status: data.status };
+}
+
+// Create a Stripe PaymentIntent. The client confirms it with Stripe.js using
+// the returned clientSecret. Server NEVER touches the raw card.
+async function createStripeIntent({ amountUSD, description, metadata }) {
+  const s = stripe();
+  if (!s) throw new Error('Stripe not configured');
+  const intent = await s.paymentIntents.create({
+    amount: Math.round(Number(amountUSD) * 100),
+    currency: 'usd',
+    description,
+    metadata: metadata || {},
+    automatic_payment_methods: { enabled: true },
+  });
+  return { clientSecret: intent.client_secret, paymentIntentId: intent.id };
+}
+
+async function retrieveStripeIntent(paymentIntentId) {
+  const s = stripe();
+  if (!s) throw new Error('Stripe not configured');
+  return s.paymentIntents.retrieve(paymentIntentId);
+}
+
+// Refund a Stripe PaymentIntent (full or partial).
+async function refundStripeCharge(paymentIntentId, amountUSD) {
+  const s = stripe();
+  if (!s) throw new Error('Stripe not configured');
+  const refund = await s.refunds.create({
+    payment_intent: paymentIntentId,
+    ...(amountUSD ? { amount: Math.round(Number(amountUSD) * 100) } : {}),
+  });
+  return { refunded: refund.status === 'succeeded', refundId: refund.id, status: refund.status };
+}
+
 module.exports = {
   paypalConfigured,
   createPaypalOrder,
   capturePaypalOrder,
+  refundPaypalCapture,
+  stripeConfigured,
+  stripePublishableKey,
+  createStripeIntent,
+  retrieveStripeIntent,
+  refundStripeCharge,
   validateCard,
 };
