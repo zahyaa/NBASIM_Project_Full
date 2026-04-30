@@ -10,7 +10,10 @@ const User = require('../models/User');
 const router = express.Router();
 
 const PLAY_TYPES = ['Set', 'ATO', 'Iso', 'PnR', 'Inbound', 'Transition'];
-const FORMATIONS = ['1-4 High', '1-4 Low', 'Horns', 'Box', '5-Out', 'Stack'];
+const FORMATIONS = [
+  '1-4 High', '1-4 Low', 'Horns', 'Box', '5-Out', 'Stack',
+  '1-3-1', '3-Out 2-In', '4-Low', '2-3 High',
+];
 const MAX_PLAYS = 25;
 
 function requireDraftStarted(user, res) {

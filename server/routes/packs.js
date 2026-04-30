@@ -21,6 +21,7 @@ const {
   toRosterEntry,
 } = require('../services/cardPacks');
 const { buildPlayerPool, claimedIdsFromUser } = require('../services/playerPool');
+const { refreshUserFinance } = require('../services/contracts');
 
 const router = express.Router();
 
@@ -155,6 +156,7 @@ router.post('/buy', auth, async (req, res) => {
     const refund = discarded > 0 ? Math.round((discarded / PACK_SIZE) * cost) : 0;
     user.tokens = (user.tokens || 0) - cost + refund;
 
+    refreshUserFinance(user);
     await user.save();
 
     res.json({

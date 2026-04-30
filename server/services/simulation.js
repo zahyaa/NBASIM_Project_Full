@@ -68,6 +68,40 @@ function randomShotLocation(shotType) {
 function simulateGame(teamA, teamB, opts = {}) {
   const QUARTERS = 4;
   const SECONDS_PER_QUARTER = 720;
+  // Sprint B3 — clutch / IQ / leadership wiring.
+  const { teamChemistryMul, clutchMul, iqDeltas } = require('./attributes');
+  const chemA = teamChemistryMul((teamA?.players || []).slice(0, 5));
+  const chemB = teamChemistryMul((teamB?.players || []).slice(0, 5));
+
+  // Sprint C1 — commentary library + home-court advantage.
+  const { commentary, CROWD } = require('./commentary');
+  // homeSide: 'A' | 'B' | undefined. Home team gets +2% shot chance and
+  // a -5% drop on opponent FT make rate.
+  const homeSide = opts.homeSide;
+  const homeBoostA = homeSide === 'A' ? 0.02 : 0;
+  const homeBoostB = homeSide === 'B' ? 0.02 : 0;
+  const ftDropA = homeSide === 'B' ? 0.05 : 0; // A is on the road
+  const ftDropB = homeSide === 'A' ? 0.05 : 0;
+
+  // Sprint C1 — momentum + hot/cold streak state per team & player.
+  let runA = 0, runB = 0;        // consecutive made buckets per team
+  let momA = 0, momB = 0;        // possessions left of momentum boost
+  const playerStreak = {};       // playerId -> consecutive makes (positive) or misses (negative)
+
+  // Sprint C2 — advanced situations.
+  // Full-court press: opts.pressA / opts.pressB raise that side's steal rate
+  // and slightly hurt opponent shot chance, but expose them to fast-break
+  // points on broken presses.
+  const pressA = !!opts.pressA;
+  const pressB = !!opts.pressB;
+  // Per-game challenges (1 per coach, surfaces in result.challenges).
+  const challenges = { A: opts.challengesA != null ? opts.challengesA : 1, B: opts.challengesB != null ? opts.challengesB : 1 };
+  const challengeLog = [];
+  // Foul tracking — fouled-out players are removed from the active rotation.
+  const fouledOut = new Set();
+  let techA = 0, techB = 0; // technicals issued
+  let flagA = 0, flagB = 0; // flagrants
+  let and1A = 0, and1B = 0; // and-1 buckets
 
   // Coach playbook bonus — sharper sets => higher shot conversion.
   // User defaults to 7 (neutral); CPU teams get 7–10 from generation.
@@ -76,6 +110,25 @@ function simulateGame(teamA, teamB, opts = {}) {
   // Each rating point above 7 adds +1.5% to that team's shot chance.
   const coachBoostA = (coachA - 7) * 0.015;
   const coachBoostB = (coachB - 7) * 0.015;
+
+  // Sprint C3 — coach style modifiers (offensive/defensive/balanced/dev).
+  // Layered on top of coachRating. Loaded lazily so the engine still works
+  // when callers don't pass coachInfo (legacy paths).
+  const { coachStyleMods, buildAssignmentLookup, defensivePenalty, paceMod } = require('./coaching');
+  const styleA = coachStyleMods(teamA?.coachInfo);
+  const styleB = coachStyleMods(teamB?.coachInfo);
+
+  // Sprint C3 — defensive assignments. opts.defensiveAssignmentsA is an
+  // array [{defenderId, opponentScorerId}] passed by the user side; the
+  // CPU may also pass one for itself.
+  const assignA = buildAssignmentLookup(opts.defensiveAssignmentsA || [], teamA?.players || []);
+  const assignB = buildAssignmentLookup(opts.defensiveAssignmentsB || [], teamB?.players || []);
+
+  // Sprint C3 — pace control. Affects elapsed-per-possession (smaller
+  // elapsed = more possessions per quarter).
+  const paceA = paceMod(opts.paceA || teamA?.coachInfo?.preferredPace);
+  const paceB = paceMod(opts.paceB || teamB?.coachInfo?.preferredPace);
+  const avgPaceMul = (paceA.possessionMul + paceB.possessionMul) / 2;
 
   // Mid-game play calling (item 2). Each side may pass an offensive +
   // defensive scheme via opts.playCallA / opts.playCallB. The offensive
@@ -113,7 +166,8 @@ function simulateGame(teamA, teamB, opts = {}) {
     const qStartA = scoreATot, qStartB = scoreBTot;
 
     while (clock > 0) {
-      const elapsed = Math.floor(Math.random() * 20) + 5;
+      // Sprint C3 — pace mul shortens/lengthens average possession.
+      const elapsed = Math.max(3, Math.round((Math.floor(Math.random() * 20) + 5) / avgPaceMul));
       clock = Math.max(0, clock - elapsed);
 
       const isTeamA = Math.random() < 0.5;
@@ -125,51 +179,147 @@ function simulateGame(teamA, teamB, opts = {}) {
       const teamName = isTeamA ? teamA.name : teamB.name;
       const oRoster = isTeamA ? teamB.players : teamA.players;
 
-      const active = roster.slice(0, 5);
-      const player = pickWeightedPlayer(active);
+      // Sprint C1 — blowout mercy: 25+ point lead in Q4 means the
+      // winning side substitutes its bench in for the rest of the game.
+      const leadForMercy = isTeamA ? (scoreATot - scoreBTot) : (scoreBTot - scoreATot);
+      const blowoutQ4 = q === 4 && leadForMercy >= 25;
+      // Sprint C2 — exclude fouled-out players from the active pool and
+      // reduce weight on players with foul trouble (3+ in H1, 5 in H2).
+      const isHealthyForRotation = (p) => !fouledOut.has(p.playerId);
+      let basePool = blowoutQ4 && roster.length > 5
+        ? roster.slice(5, Math.min(10, roster.length))
+        : roster.slice(0, 5);
+      basePool = basePool.filter(isHealthyForRotation);
+      // Backfill from bench if the active 5 has lost players to foul-out.
+      if (basePool.length < 5) {
+        for (const p of roster.slice(5)) {
+          if (basePool.length >= 5) break;
+          if (isHealthyForRotation(p)) basePool.push(p);
+        }
+      }
+      const active = basePool.length ? basePool : roster.slice(0, 5);
+      // Foul-trouble: temporarily down-weight starters with 3+ fouls in H1
+      // or 5 in H2 by halving their pick weight (clone with reduced rating).
+      const weighted = active.map(p => {
+        const fb = (box[p.playerId] && box[p.playerId].pf) || 0;
+        const inTrouble = (q <= 2 && fb >= 3) || (q >= 3 && fb >= 5);
+        return inTrouble ? { ...(p.toObject ? p.toObject() : p), rating: Math.round((p.rating || 70) * 0.5) } : p;
+      });
+      const player = pickWeightedPlayer(weighted);
       if (!player) continue;
       const pBox = box[player.playerId];
-      pBox.min += Math.round(elapsed / 60 * 10) / 10;
-
-      const sideMul = isTeamA ? shotMulA : shotMulB;
+      pBox.min += Math.round(elapsed / 60 * 10) / 10;      const sideMul = isTeamA ? shotMulA : shotMulB;
       // Play-call adjustment: offensive scheme boosts your conversion;
       // opponent's defensive scheme drops it. Both apply if active.
       const playAdj = isTeamA
         ? (offBoostA - defDropA)
         : (offBoostB - defDropB);
-      const rawChance = (0.35 + (player.rating / 99) * 0.25 + (isTeamA ? coachBoostA : coachBoostB) + playAdj) * sideMul;
+      // Sprint B3 — clutch + chemistry shot multipliers.
+      const marginAbs = Math.abs(scoreATot - scoreBTot);
+      const clutchM = clutchMul(player, { quarter: q, marginAbs });
+      const chemM = isTeamA ? chemA : chemB;
+      // Sprint C1 — home-court, momentum, hot/cold streaks.
+      const homeAdj = isTeamA ? homeBoostA : homeBoostB;
+      const momentumActive = (isTeamA ? momA : momB) > 0;
+      const momentumAdj = momentumActive ? 0.05 : 0;
+      const streakCount = playerStreak[player.playerId] || 0;
+      let streakAdj = 0;
+      if (streakCount >= 3) streakAdj = 0.04;          // hot: +4%
+      else if (streakCount <= -4) streakAdj = -0.05;   // cold: -5%
+      // Sprint C2 — full-court press: opponent press drops your shot chance
+      // ~1.5% (rushed offense) while raising the steal threshold band.
+      const oppressed = isTeamA ? pressB : pressA;
+      const pressDrop = oppressed ? 0.015 : 0;
+      // Sprint C3 — coach style + assigned-defender penalty.
+      const styleOwn = isTeamA ? styleA.ownShotBoost : styleB.ownShotBoost;
+      const styleOpp = isTeamA ? styleB.oppShotDrop : styleA.oppShotDrop;
+      const guardLookup = isTeamA ? assignB : assignA; // opponent's lookup
+      const guardPenalty = defensivePenalty(player, guardLookup);
+      const rawChance = (0.35 + (player.rating / 99) * 0.25 + (isTeamA ? coachBoostA : coachBoostB) + playAdj + homeAdj + momentumAdj + streakAdj - pressDrop + styleOwn - styleOpp + guardPenalty) * sideMul * clutchM * chemM;
       const shotChance = Math.max(0.25, Math.min(0.85, rawChance));
       // Made-shot ceiling: scoring outcomes occupy [0, made]; misses, steals,
       // assists, blocks, turnovers, fouls split the remaining (1 - made)
       // proportionally so miss rates scale inversely with difficulty.
       const made    = shotChance * 0.88;
       const rem     = 1 - made;
+      // Sprint B3 — IQ shifts assist/turnover splits.
+      const { assistDelta, turnoverDelta } = iqDeltas(player);
       const tMiss2  = made + rem * 0.32;
       const tMiss3  = made + rem * 0.50;
-      const tAst    = made + rem * 0.62;
-      const tStl    = made + rem * 0.74;
+      const tAst    = made + rem * (0.62 + assistDelta);
+      // Sprint C2 — pressing defense raises steal probability (~+5pp)
+      // but the offense gets fast-break paint conversions when they break
+      // the press (handled in paint branch).
+      const tStl    = made + rem * (oppressed ? 0.79 : 0.74);
       const tBlk    = made + rem * 0.84;
-      const tTO     = made + rem * 0.95;
+      const tTO     = made + rem * (0.95 + turnoverDelta);
       // remaining tail = foul
       const roll = Math.random();
+      // Sprint C2 — intentional foul: trailing team in final minute of Q4
+      // intentionally fouls when 3+ down and they are on defense.
+      const finalMinute = q === 4 && clock <= 60;
+      const trailingByThree = finalMinute && (
+        (isTeamA && (scoreATot - scoreBTot) <= -3) ||
+        (!isTeamA && (scoreBTot - scoreATot) <= -3)
+      );
+      // Trailing side commits the foul on opponent possession; here `isTeamA`
+      // = possessing side, so when the OPPOSITE team trails, opponent will
+      // foul this possession. We model that by forcing the foul branch with
+      // a synthetic high roll so the play resolves as a non-shooting foul
+      // sending the offense to the line. We only do this 70% of possessions
+      // to keep some variety.
+      const oppTrails = finalMinute && (
+        (isTeamA && (scoreATot - scoreBTot) >= 3) ||
+        (!isTeamA && (scoreBTot - scoreATot) >= 3)
+      );
+      const forceIntentionalFoul = oppTrails && Math.random() < 0.7;
 
       let points = 0;
       let playText = '';
       let playType = '';
 
-      if (roll < shotChance * 0.45) {
+      if (forceIntentionalFoul) {
+        // Defensive intentional foul on the offensive star (highest rated active opponent).
+        const fouler = (oRoster.slice(0, 5).filter(p => !fouledOut.has(p.playerId)).sort((a, b) => (a.rating || 0) - (b.rating || 0))[0]) || oRoster[0];
+        const foulerBox = oBox[fouler.playerId];
+        if (foulerBox) foulerBox.pf++; oStats.pf++;
+        const ftMake = 0.78 - (isTeamA ? ftDropA : ftDropB);
+        let ftPts = 0;
+        if (Math.random() < ftMake) ftPts++;
+        if (Math.random() < ftMake) ftPts++;
+        pBox.fta += 2; tStats.fta += 2;
+        if (ftPts) { pBox.ftm += ftPts; tStats.ftm += ftPts; pBox.pts += ftPts; tStats.pts += ftPts; points = ftPts; }
+        if (isTeamA) scoreATot += ftPts; else scoreBTot += ftPts;
+        playText = `Intentional foul by ${fouler.firstName} ${fouler.lastName}! ${player.firstName} ${player.lastName} hits ${ftPts}/2.`;
+        playType = 'foul';
+        if (foulerBox && foulerBox.pf >= 6 && !fouledOut.has(fouler.playerId)) {
+          fouledOut.add(fouler.playerId);
+          playText += ` ${fouler.firstName} ${fouler.lastName} has fouled out!`;
+        }
+      } else if (roll < shotChance * 0.45) {
         // 2-pointer in paint
         points = 2;
         pBox.fgm++; pBox.fga++; tStats.fgm++; tStats.fga++;
         tStats.ptsInPaint += 2;
-        playText = `${player.firstName} ${player.lastName} drives and scores!`;
+        // Sprint C2 — and-1: 10% chance contact triggers an extra FT.
+        const isAnd1 = Math.random() < 0.10;
+        if (isAnd1) {
+          const ftMake = 0.75 - (isTeamA ? ftDropA : ftDropB);
+          if (Math.random() < ftMake) { pBox.pts += 1; tStats.pts += 1; pBox.ftm++; tStats.ftm++; points += 1; }
+          pBox.fta += 1; tStats.fta += 1;
+          if (isTeamA) and1A++; else and1B++;
+        }
+        // Sprint C2 — fast-break note when defense was pressing and we broke it.
+        const wasFastBreak = oppressed && Math.random() < 0.35;
+        playText = wasFastBreak ? commentary('fastbreak', { player }) : commentary('paint', { player });
+        if (isAnd1) playText += ` AND-ONE! Foul on the play \u2014 free throw to follow.`;
         playType = 'score';
         shots.push({ team: teamName, x: randomShotLocation('paint').x, y: randomShotLocation('paint').y, made: true, type: '2pt' });
       } else if (roll < shotChance * 0.65) {
         // Mid-range 2
         points = 2;
         pBox.fgm++; pBox.fga++; tStats.fgm++; tStats.fga++;
-        playText = `${player.firstName} ${player.lastName} hits a mid-range jumper!`;
+        playText = commentary('mid', { player });
         playType = 'score';
         shots.push({ team: teamName, ...randomShotLocation('mid'), made: true, type: '2pt' });
       } else if (roll < shotChance * 0.8) {
@@ -177,22 +327,23 @@ function simulateGame(teamA, teamB, opts = {}) {
         points = 3;
         pBox.fgm++; pBox.fga++; pBox.fg3m++; pBox.fg3a++;
         tStats.fgm++; tStats.fga++; tStats.fg3m++; tStats.fg3a++;
-        playText = `${player.firstName} ${player.lastName} drains a 3-pointer!`;
+        playText = commentary('three', { player });
         playType = 'score';
         shots.push({ team: teamName, ...randomShotLocation('3pt'), made: true, type: '3pt' });
       } else if (roll < shotChance * 0.88) {
-        // Free throws (2 attempts)
-        const ft1 = Math.random() < 0.75;
-        const ft2 = Math.random() < 0.75;
+        // Free throws (2 attempts) — Sprint C1: home crowd drops opponent FT make rate.
+        const ftMake = 0.75 - (isTeamA ? ftDropA : ftDropB);
+        const ft1 = Math.random() < ftMake;
+        const ft2 = Math.random() < ftMake;
         pBox.fta += 2; tStats.fta += 2;
         if (ft1) { pBox.ftm++; tStats.ftm++; points++; }
         if (ft2) { pBox.ftm++; tStats.ftm++; points++; }
-        playText = `${player.firstName} ${player.lastName} goes to the line: ${ft1 ? '✓' : '✗'}/${ft2 ? '✓' : '✗'} (${points} pts)`;
+        playText = `${commentary('ft', { player })} ${ft1 ? '✓' : '✗'}/${ft2 ? '✓' : '✗'} (${points} pts)`;
         playType = points > 0 ? 'score' : 'miss';
       } else if (roll < tMiss2) {
         // Missed 2pt
         pBox.fga++; tStats.fga++;
-        playText = `${player.firstName} ${player.lastName} misses the shot.`;
+        playText = commentary('miss2', { player });
         playType = 'miss';
         shots.push({ team: teamName, ...randomShotLocation('mid'), made: false, type: '2pt' });
         // Rebound
@@ -202,23 +353,23 @@ function simulateGame(teamA, teamB, opts = {}) {
         const rebBox = offReb ? box[rebounder.playerId] : oBox[rebounder.playerId];
         const rebStats = offReb ? tStats : oStats;
         rebBox.reb++; rebStats.reb++;
-        playText += ` ${rebounder.firstName} ${rebounder.lastName} grabs the rebound.`;
+        playText += ' ' + commentary(offReb ? 'putback' : 'rebound', { player: rebounder, reb: rebounder });
       } else if (roll < tMiss3) {
         // Missed 3pt
         pBox.fga++; pBox.fg3a++; tStats.fga++; tStats.fg3a++;
-        playText = `${player.firstName} ${player.lastName} misses the three.`;
+        playText = commentary('miss3', { player });
         playType = 'miss';
         shots.push({ team: teamName, ...randomShotLocation('3pt'), made: false, type: '3pt' });
         const rebounder = pickWeightedPlayer(oRoster.slice(0, 5));
         oBox[rebounder.playerId].reb++; oStats.reb++;
-        playText += ` ${rebounder.firstName} ${rebounder.lastName} rebounds.`;
+        playText += ' ' + commentary('rebound', { reb: rebounder });
       } else if (roll < tAst) {
         // Assist + score
         const assister = active.find(p => p.playerId !== player.playerId) || player;
         box[assister.playerId].ast++; tStats.ast++;
         points = 2;
         pBox.fgm++; pBox.fga++; tStats.fgm++; tStats.fga++;
-        playText = `${assister.firstName} ${assister.lastName} finds ${player.firstName} ${player.lastName} for the easy bucket!`;
+        playText = commentary('assist', { player, assist: assister });
         playType = 'score';
         shots.push({ team: teamName, ...randomShotLocation('paint'), made: true, type: '2pt' });
       } else if (roll < tStl) {
@@ -226,26 +377,61 @@ function simulateGame(teamA, teamB, opts = {}) {
         const stealer = pickWeightedPlayer(oRoster.slice(0, 5));
         oBox[stealer.playerId].stl++; oStats.stl++;
         pBox.turnover++; tStats.turnover++;
-        playText = `${stealer.firstName} ${stealer.lastName} steals it from ${player.firstName} ${player.lastName}!`;
+        playText = commentary('steal', { player, defender: stealer });
         playType = 'steal';
       } else if (roll < tBlk) {
         // Block
         const blocker = pickWeightedPlayer(oRoster.slice(0, 5));
         oBox[blocker.playerId].blk++; oStats.blk++;
         pBox.fga++; tStats.fga++;
-        playText = `${blocker.firstName} ${blocker.lastName} blocks ${player.firstName} ${player.lastName}!`;
+        playText = commentary('block', { player, defender: blocker });
         playType = 'block';
         shots.push({ team: teamName, ...randomShotLocation('paint'), made: false, type: '2pt', blocked: true });
       } else if (roll < tTO) {
         // Turnover
         pBox.turnover++; tStats.turnover++;
-        playText = `${player.firstName} ${player.lastName} turns the ball over.`;
+        playText = commentary('turnover', { player });
         playType = 'turnover';
       } else {
-        // Foul
+        // Foul — Sprint C2 expansion: 2% flagrant (2 FTs + possession),
+        // ~1% technical (1 FT). Otherwise normal personal foul.
         pBox.pf++; tStats.pf++;
-        playText = `Foul on ${player.firstName} ${player.lastName}.`;
-        playType = 'foul';
+        const fr = Math.random();
+        if (fr < 0.02) {
+          // Flagrant: opponent shoots 2 FTs.
+          const fouled = pickWeightedPlayer(oRoster.slice(0, 5)) || oRoster[0];
+          const ftMake = 0.75 - (isTeamA ? ftDropA : ftDropB);
+          let ftPts = 0;
+          if (Math.random() < ftMake) ftPts++;
+          if (Math.random() < ftMake) ftPts++;
+          oBox[fouled.playerId].fta += 2; oStats.fta += 2;
+          if (ftPts) { oBox[fouled.playerId].ftm += ftPts; oStats.ftm += ftPts; oBox[fouled.playerId].pts += ftPts; oStats.pts += ftPts; }
+          if (isTeamA) { scoreBTot += ftPts; flagA++; } else { scoreATot += ftPts; flagB++; }
+          playText = `FLAGRANT FOUL on ${player.firstName} ${player.lastName}! ${fouled.firstName} ${fouled.lastName} hits ${ftPts}/2 from the line.`;
+          playType = 'flagrant';
+        } else if (fr < 0.03) {
+          // Technical: opponent shoots 1 FT.
+          const shooter = pickWeightedPlayer(oRoster.slice(0, 5)) || oRoster[0];
+          const ftMake = 0.78 - (isTeamA ? ftDropA : ftDropB);
+          const make = Math.random() < ftMake;
+          oBox[shooter.playerId].fta += 1; oStats.fta += 1;
+          if (make) {
+            oBox[shooter.playerId].ftm++; oStats.ftm++;
+            oBox[shooter.playerId].pts++; oStats.pts++;
+            if (isTeamA) scoreBTot++; else scoreATot++;
+          }
+          if (isTeamA) techA++; else techB++;
+          playText = `TECHNICAL FOUL on ${player.firstName} ${player.lastName}. ${shooter.firstName} ${shooter.lastName} ${make ? 'sinks' : 'misses'} the technical.`;
+          playType = 'technical';
+        } else {
+          playText = commentary('foul', { player });
+          playType = 'foul';
+        }
+        // Sprint C2 — foul-out: 6 personal fouls => ejected.
+        if (pBox.pf >= 6 && !fouledOut.has(player.playerId)) {
+          fouledOut.add(player.playerId);
+          playText += ` ${player.firstName} ${player.lastName} has fouled out!`;
+        }
       }
 
       if (points > 0) {
@@ -253,6 +439,38 @@ function simulateGame(teamA, teamB, opts = {}) {
         tStats.pts += points;
         if (isTeamA) scoreATot += points; else scoreBTot += points;
       }
+
+      // Sprint C1 — momentum + hot/cold streak bookkeeping.
+      const wasMade = points > 0 && (playType === 'score');
+      // Made FG (not FT-only) updates the player streak. FT trips don't count.
+      if (wasMade && roll < shotChance * 0.8) {
+        playerStreak[player.playerId] = Math.max(1, (playerStreak[player.playerId] || 0)) + 1;
+        // Reset cold flags for same player
+      } else if (playType === 'miss' || playType === 'block') {
+        playerStreak[player.playerId] = Math.min(-1, (playerStreak[player.playerId] || 0)) - 1;
+      }
+      // Team run tracking — counts consecutive scoring possessions.
+      if (wasMade) {
+        if (isTeamA) { runA += 1; runB = 0; } else { runB += 1; runA = 0; }
+        // 3+ consecutive scores triggers 2-possession momentum window.
+        if (isTeamA && runA >= 3) momA = 2; else if (!isTeamA && runB >= 3) momB = 2;
+      } else if (playType === 'miss' || playType === 'turnover' || playType === 'block' || playType === 'steal') {
+        if (isTeamA) runA = 0; else runB = 0;
+      }
+      // Decrement momentum window on opposing possession.
+      if (isTeamA) { if (momB > 0) momB -= 1; } else { if (momA > 0) momA -= 1; }
+
+      // Hot-streak / cold-streak / crowd callouts attach to text only.
+      const sc = playerStreak[player.playerId] || 0;
+      if (sc === 3 && wasMade) playText += ` 🔥 ${player.firstName} ${player.lastName} is HEATING UP!`;
+      else if (sc >= 5 && wasMade) playText += ` 🔥🔥 ${player.firstName} ${player.lastName} IS ON FIRE!`;
+      else if (sc <= -4 && (playType === 'miss' || playType === 'block')) {
+        playText += ` ❄️ ${player.firstName} ${player.lastName} can\u2019t buy a bucket.`;
+      }
+      if (wasMade && (runA === 6 || runB === 6)) {
+        playText += ' ' + (homeSide === (runA === 6 ? 'A' : 'B') ? CROWD.homeIgnites : CROWD.bigRun);
+      }
+      if (blowoutQ4) playText += ' [Bench unit in — mercy minutes]';
 
       // Track largest lead
       const diff = isTeamA ? scoreATot - scoreBTot : scoreBTot - scoreATot;
@@ -295,7 +513,7 @@ function simulateGame(teamA, teamB, opts = {}) {
     plays.push({ quarter: `OT${otPeriod}`, clock: '5:00', team: '', text: `--- Overtime ${otPeriod} begins! ---`, scoreA: scoreATot, scoreB: scoreBTot, type: 'info' });
 
     while (clock > 0) {
-      const elapsed = Math.floor(Math.random() * 20) + 5;
+      const elapsed = Math.max(3, Math.round((Math.floor(Math.random() * 20) + 5) / avgPaceMul));
       clock = Math.max(0, clock - elapsed);
 
       const isTeamA = Math.random() < 0.5;
@@ -388,6 +606,16 @@ function simulateGame(teamA, teamB, opts = {}) {
     },
     timeoutsA: typeof opts.timeoutsA === 'number' ? opts.timeoutsA : 6,
     timeoutsB: typeof opts.timeoutsB === 'number' ? opts.timeoutsB : 6,
+    // Sprint C2 — advanced game situations report.
+    situations: {
+      and1: { A: and1A, B: and1B },
+      flagrants: { A: flagA, B: flagB },
+      technicals: { A: techA, B: techB },
+      fouledOut: Array.from(fouledOut),
+      challengesRemaining: { A: challenges.A, B: challenges.B },
+      challengeLog,
+      pressA, pressB,
+    },
   };
 }
 

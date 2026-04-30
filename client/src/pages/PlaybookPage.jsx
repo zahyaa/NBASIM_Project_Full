@@ -4,6 +4,8 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { PRESET_PLAYS } from '../data/presetPlays';
+import PlayDiagram from '../components/PlayDiagram';
 
 const EMPTY = {
   name: '',
@@ -24,6 +26,8 @@ export default function PlaybookPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [toast, setToast] = useState('');
+  const [presetCategory, setPresetCategory] = useState('All');
+  const [previewPreset, setPreviewPreset] = useState(null);
 
   const load = useCallback(async () => {
     try {
@@ -74,6 +78,42 @@ export default function PlaybookPage() {
       await load();
     } catch (err) { setError(err.message); }
     setBusy(false);
+  };
+
+  const addPreset = async (preset) => {
+    setBusy(true); setError(''); setToast('');
+    try {
+      const body = {
+        name: preset.name,
+        type: preset.type,
+        formation: preset.formation,
+        primary: '', secondary: '', screener: '',
+        description: preset.description,
+      };
+      const res = await fetch('/api/playbook', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(body),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error);
+      setToast(`Added "${preset.name}" to your playbook — assign players below.`);
+      await load();
+    } catch (err) { setError(err.message); }
+    setBusy(false);
+  };
+
+  const loadPresetIntoEditor = (preset) => {
+    setEditingId(null);
+    setDraft({
+      name: preset.name,
+      type: preset.type,
+      formation: preset.formation,
+      primary: '', secondary: '', screener: '',
+      description: preset.description,
+    });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    setToast(`Loaded "${preset.name}" into editor — assign players and Save.`);
   };
 
   const editPlay = (p) => {
@@ -212,6 +252,26 @@ export default function PlaybookPage() {
         </div>
       </div>
 
+      <PresetGallery
+        presets={PRESET_PLAYS}
+        category={presetCategory}
+        setCategory={setPresetCategory}
+        onAdd={addPreset}
+        onLoadIntoEditor={loadPresetIntoEditor}
+        onPreview={setPreviewPreset}
+        busy={busy}
+        full={(data?.plays?.length || 0) >= (data?.max || 25)}
+      />
+
+      {previewPreset && (
+        <PresetPreviewModal
+          preset={previewPreset}
+          onClose={() => setPreviewPreset(null)}
+          onAdd={() => { addPreset(previewPreset); setPreviewPreset(null); }}
+          onLoad={() => { loadPresetIntoEditor(previewPreset); setPreviewPreset(null); }}
+        />
+      )}
+
       <h2 style={s.sectionTitle}>Saved Plays</h2>
       {!data?.plays?.length && (
         <p style={s.help}>No plays yet. Design your first play above — it will be saved to Team Management.</p>
@@ -274,4 +334,121 @@ const s = {
   desc: { fontSize: 13, color: '#e2e8f0', margin: '8px 0', lineHeight: 1.4 },
   cardActions: { display: 'flex', gap: 8, marginTop: 8 },
   smallBtn: { padding: '6px 12px', background: '#1e3a8a', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600 },
+  // ---- Preset gallery ----
+  presetSection: { background: '#1e293b', border: '1px solid #334155', borderRadius: 12, padding: 20, marginBottom: 24 },
+  presetIntro: { color: '#94a3b8', fontSize: 13, margin: '0 0 12px', lineHeight: 1.5 },
+  tabBar: { display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 14 },
+  tab: { padding: '6px 12px', background: '#0f172a', color: '#cbd5e1', border: '1px solid #334155', borderRadius: 999, cursor: 'pointer', fontSize: 12, fontWeight: 600 },
+  tabActive: { background: '#f97316', color: '#fff', borderColor: '#f97316' },
+  presetGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 14 },
+  presetCard: { background: '#0f172a', border: '1px solid #334155', borderRadius: 10, padding: 12, display: 'flex', flexDirection: 'column', gap: 8 },
+  presetDiagramWrap: { background: '#fde68a', borderRadius: 6, padding: 4, alignSelf: 'center' },
+  presetName: { fontSize: 16, fontWeight: 700, color: '#fff' },
+  presetCategory: { fontSize: 11, color: '#fbbf24', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 },
+  presetDesc: { fontSize: 12, color: '#cbd5e1', lineHeight: 1.4, margin: 0, minHeight: 50 },
+  presetActions: { display: 'flex', gap: 6, marginTop: 'auto' },
+  presetBtn: { flex: 1, padding: '7px 10px', background: '#f97316', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 700 },
+  presetBtnAlt: { flex: 1, padding: '7px 10px', background: '#1e3a8a', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600 },
+  presetBtnGhost: { padding: '7px 10px', background: 'transparent', color: '#cbd5e1', border: '1px solid #475569', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600 },
+  // ---- Modal ----
+  modalBackdrop: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 20 },
+  modalCard: { background: '#1e293b', border: '1px solid #334155', borderRadius: 12, padding: 20, maxWidth: 700, width: '100%', maxHeight: '90vh', overflowY: 'auto' },
+  modalHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  modalTitle: { fontSize: 22, color: '#fff', margin: 0, fontWeight: 800 },
+  modalClose: { background: 'transparent', border: 'none', color: '#cbd5e1', fontSize: 24, cursor: 'pointer' },
+  modalDiagramWrap: { background: '#fde68a', borderRadius: 6, padding: 6, display: 'flex', justifyContent: 'center', marginBottom: 12 },
 };
+
+function PresetGallery({ presets, category, setCategory, onAdd, onLoadIntoEditor, onPreview, busy, full }) {
+  const categories = ['All', ...Array.from(new Set(presets.map(p => p.category)))];
+  const filtered = category === 'All' ? presets : presets.filter(p => p.category === category);
+  return (
+    <div style={s.presetSection} data-testid="pb-preset-gallery">
+      <h2 style={s.sectionTitle}>📚 Preset Plays — {presets.length} Pre-Built Sets</h2>
+      <p style={s.presetIntro}>
+        Pro-style plays with diagrams, ready to drop into your playbook. Click <b>Add</b> to
+        save it instantly (assign players later from the Edit screen), or <b>Edit</b> to load
+        it into the form above and customize the lineup before saving.
+      </p>
+      <div style={s.tabBar} role="tablist">
+        {categories.map(c => (
+          <button
+            key={c}
+            type="button"
+            role="tab"
+            data-testid={`pb-preset-tab-${c.replace(/\s+/g, '-')}`}
+            aria-selected={category === c}
+            onClick={() => setCategory(c)}
+            style={{ ...s.tab, ...(category === c ? s.tabActive : {}) }}
+          >
+            {c} {c === 'All' ? `(${presets.length})` : `(${presets.filter(p => p.category === c).length})`}
+          </button>
+        ))}
+      </div>
+      <div style={s.presetGrid}>
+        {filtered.map((p, i) => (
+          <div key={p.presetId} style={s.presetCard} data-testid={`pb-preset-${p.presetId}`}>
+            <div style={s.presetCategory}>{p.category} · {p.formation}</div>
+            <div style={s.presetName}>{p.name}</div>
+            <div style={s.presetDiagramWrap}>
+              <PlayDiagram diagram={p.diagram} width={220} />
+            </div>
+            <p style={s.presetDesc}>{p.description}</p>
+            <div style={s.presetActions}>
+              <button
+                type="button"
+                onClick={() => onAdd(p)}
+                disabled={busy || full}
+                title={full ? 'Playbook is full — delete a play to make room' : ''}
+                data-testid={`pb-preset-add-${p.presetId}`}
+                style={{ ...s.presetBtn, opacity: full ? 0.5 : 1, cursor: full ? 'not-allowed' : 'pointer' }}
+              >
+                + Add
+              </button>
+              <button
+                type="button"
+                onClick={() => onLoadIntoEditor(p)}
+                disabled={busy}
+                style={s.presetBtnAlt}
+              >
+                Edit
+              </button>
+              <button
+                type="button"
+                onClick={() => onPreview(p)}
+                style={s.presetBtnGhost}
+                aria-label={`View larger diagram for ${p.name}`}
+              >
+                🔍
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function PresetPreviewModal({ preset, onClose, onAdd, onLoad }) {
+  return (
+    <div style={s.modalBackdrop} onClick={onClose} role="dialog" aria-modal="true">
+      <div style={s.modalCard} onClick={e => e.stopPropagation()}>
+        <div style={s.modalHeader}>
+          <div>
+            <div style={s.presetCategory}>{preset.category} · {preset.formation} · {preset.type}</div>
+            <h2 style={s.modalTitle}>{preset.name}</h2>
+          </div>
+          <button type="button" onClick={onClose} style={s.modalClose} aria-label="Close">×</button>
+        </div>
+        <div style={s.modalDiagramWrap}>
+          <PlayDiagram diagram={preset.diagram} width={500} />
+        </div>
+        <p style={{ color: '#e2e8f0', lineHeight: 1.5, fontSize: 14 }}>{preset.description}</p>
+        <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
+          <button type="button" onClick={onAdd} style={s.primaryBtn}>+ Add to Playbook</button>
+          <button type="button" onClick={onLoad} style={s.secondaryBtn}>Edit Before Saving</button>
+        </div>
+      </div>
+    </div>
+  );
+}

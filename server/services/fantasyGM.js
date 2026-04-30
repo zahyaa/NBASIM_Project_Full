@@ -10,6 +10,7 @@
 //   coaches relative to the user.
 
 const { getDifficultyMods } = require('./simulation');
+const { assignContract } = require('./contracts');
 
 const DIVISIONS = {
   East: ['Atlantic', 'Central', 'Southeast'],
@@ -396,7 +397,7 @@ function distributePlayersToCpuTeams({ cpuTeams, pool, picksPerTeam = 15, rng = 
         position: best.position,
         rating: best.rating,
         stats: best.stats,
-        contract: { years: 1 + Math.floor(rng() * 4), salary: Math.round((best.rating || 70) * 0.5) },
+        contract: assignContract(best, { isRookie: !!best.isRookie, rng }),
       });
     }
   }
@@ -493,14 +494,19 @@ module.exports = {
 // the highest-rated remaining players so the simulation always has 5.
 function applyLineup(team) {
   if (!team || !Array.isArray(team.players) || team.players.length === 0) return team;
-  const starters = team.players.filter(p => p.inLineup);
-  const bench = team.players.filter(p => !p.inLineup);
+  // Sprint B2: injured players never enter the active 5. They keep their
+  // roster slot but get pushed to the back so the simulation slice skips them.
+  const isInjured = (p) => !!(p.injury && p.injury.isInjured) || p.injured;
+  const healthy = team.players.filter(p => !isInjured(p));
+  const injured = team.players.filter(isInjured);
+  const starters = healthy.filter(p => p.inLineup);
+  const bench = healthy.filter(p => !p.inLineup);
   // Backfill from bench (highest-rated first) until we have 5 starters.
   if (starters.length < 5) {
     bench.sort((a, b) => (b.rating || 0) - (a.rating || 0));
     while (starters.length < 5 && bench.length) starters.push(bench.shift());
   }
-  return { ...team, players: [...starters.slice(0, 5), ...bench] };
+  return { ...team, players: [...starters.slice(0, 5), ...bench, ...injured] };
 }
 
 // Average roster rating — used as the strength signal for the lightweight

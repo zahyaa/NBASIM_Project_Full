@@ -6,6 +6,22 @@ const { simulateGame, simulate1v1, simulateBlacktop } = require('../services/sim
 const { applyLineup } = require('../services/fantasyGM');
 const router = express.Router();
 
+// Sprint I — rate limit simulation endpoints. Each user can run a bounded
+// number of game simulations per minute to keep CPU/memory predictable on
+// shared hosting. Loose in dev/test so E2E loops aren't blocked.
+const rateLimit = require('express-rate-limit');
+const simLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: process.env.NODE_ENV === 'production' ? 30 : 300,
+  message: { error: 'Simulation rate limit reached. Slow down a bit.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  // Skip entirely in unit-test mode so the test harness can hammer it.
+  skip: () => process.env.NODE_ENV === 'test',
+  // Use library default keyGenerator (handles IPv6 safely).
+});
+router.use(simLimiter);
+
 // Coach play-call helpers (item 2). User-supplied play call is sanitized to
 // a flat { offensive, defensive } shape — both fields optional strings of
 // up to 60 chars. CPU randomly picks named NBA schemes so both sides run a

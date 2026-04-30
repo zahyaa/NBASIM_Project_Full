@@ -8,6 +8,9 @@ const auth = require('../middleware/auth');
 const User = require('../models/User');
 const {
   buildBracket,
+  buildBracketWithPlayIn,
+  buildPlayInPool,
+  runPlayIn,
   playSeries,
   advanceBracket,
   simulateAll,
@@ -79,7 +82,7 @@ router.post('/start', auth, async (req, res) => {
     if (user.playoffs?.started && user.playoffs.seasonNumber === user.seasonNumber) {
       return res.json({ message: 'Playoffs already in progress', rounds: user.playoffs.rounds });
     }
-    const rounds = buildBracket(user);
+    const rounds = buildBracketWithPlayIn(user);
     user.playoffs = {
       started: true,
       completed: false,
@@ -223,6 +226,46 @@ router.post('/simulate-all', auth, async (req, res) => {
       tokensAwarded: rewards.tokensAwarded,
       newAchievements: rewards.newAchievements,
     });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ----------------------------------------- Sprint E2 Play-In Tournament
+
+// GET /api/playoffs/play-in/preview — shows seeds 7-10 from each conf.
+router.get('/play-in/preview', auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    if (!ensureSeasonComplete(user, res)) return;
+    res.json({
+      pool: buildPlayInPool(user),
+      results: user.playInResults && user.playInResults.seasonNumber === user.seasonNumber ? user.playInResults : null,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/playoffs/play-in/run — sim the play-in tournament.
+router.post('/play-in/run', auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    if (!ensureSeasonComplete(user, res)) return;
+    if (user.playoffs?.started && user.playoffs.seasonNumber === user.seasonNumber) {
+      return res.status(400).json({ error: 'Playoffs already started — play-in window has closed' });
+    }
+    const results = runPlayIn(user);
+    pushNews(user, {
+      id: `playin_${Date.now()}`, kind: 'system',
+      headline: 'Play-In Tournament complete — final seeds locked',
+      body: `East 7: ${results.east.seed7?.name}, East 8: ${results.east.seed8?.name}. West 7: ${results.west.seed7?.name}, West 8: ${results.west.seed8?.name}.`,
+      seasonNumber: user.seasonNumber,
+    });
+    await user.save();
+    res.json({ message: 'Play-In complete', results });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

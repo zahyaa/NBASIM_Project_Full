@@ -20,6 +20,14 @@ if (!isTest) {
   mongoose.connect(MONGODB_URI)
     .then(() => console.log('Connected to MongoDB'))
     .catch(err => { console.error('MongoDB connection error:', err.message); process.exit(1); });
+
+  // Sprint I — kick off the weekly subscriber bonus scheduler. No-op in
+  // test mode (handled inside the module).
+  try {
+    require('./services/subscriptionScheduler').startScheduler();
+  } catch (err) {
+    console.error('Failed to start subscription scheduler:', err.message);
+  }
 }
 
 app.set('trust proxy', 1);
@@ -82,6 +90,11 @@ const playoffsRoutes = require('./routes/playoffs');
 const newsRoutes = require('./routes/news');
 const allstarRoutes = require('./routes/allstar');
 const paymentsRoutes = require('./routes/payments');
+const frontofficeRoutes = require('./routes/frontoffice');
+const tradesRoutes = require('./routes/trades');
+const coachingRoutes = require('./routes/coaching');
+const leagueRoutes = require('./routes/league');
+const awardsRecordsRoutes = require('./routes/awardsRecords');
 
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -114,6 +127,11 @@ app.use('/api/playoffs', playoffsRoutes);
 app.use('/api/news', newsRoutes);
 app.use('/api/allstar', allstarRoutes);
 app.use('/api/payments', paymentsRoutes);
+app.use('/api/frontoffice', frontofficeRoutes);
+app.use('/api/trades', tradesRoutes);
+app.use('/api/coaching', coachingRoutes);
+app.use('/api/league', leagueRoutes);
+app.use('/api', awardsRecordsRoutes);
 
 // Frontend is hosted separately (Netlify). This server only exposes /api/*.
 // CRA's dev proxy handles same-origin /api/* during local development.

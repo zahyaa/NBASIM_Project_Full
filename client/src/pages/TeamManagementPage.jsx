@@ -12,6 +12,7 @@ export default function TeamManagementPage() {
   const [error, setError] = useState('');
   const [tab, setTab] = useState('lineup'); // lineup | sign | trade | injuries | contracts
   const [customPlays, setCustomPlays] = useState([]);
+  const [attrRows, setAttrRows] = useState(null); // Sprint B3
 
   const refresh = useCallback(async () => {
     setError('');
@@ -183,8 +184,21 @@ export default function TeamManagementPage() {
     { k: 'trade', label: 'Trade' },
     { k: 'injuries', label: 'Injuries' },
     { k: 'contracts', label: 'Contracts' },
+    { k: 'attributes', label: 'Attributes' },
     { k: 'playbook', label: "Coach's Playbook" },
   ];
+
+  // Sprint B3 — fetch full attribute card when entering the Attributes tab.
+  useEffect(() => {
+    if (tab !== 'attributes' || attrRows) return;
+    (async () => {
+      try {
+        const res = await fetch('/api/team/attributes', { headers: { Authorization: `Bearer ${token}` } });
+        const data = await res.json();
+        if (res.ok) setAttrRows(data.players || []);
+      } catch (_) { /* non-fatal */ }
+    })();
+  }, [tab, attrRows, token]);
 
   // Generate 10 playbooks tailored to the current roster. Each play picks
   // real players from the team for the relevant role (PG handler, top
@@ -416,6 +430,53 @@ export default function TeamManagementPage() {
           </ul>
         </div>
       )}
+      {tab === 'attributes' && (
+        <div style={s.panel} data-testid="attributes-panel">
+          <p style={s.help}>
+            Hidden ratings driving the simulation. Clutch, IQ, and Leadership were
+            added in Sprint B3. Durability sets injury frequency; Work Ethic
+            multiplies offseason progression.
+          </p>
+          {!attrRows ? (
+            <div style={{ color: '#94a3b8', padding: 16 }}>Loading attributes…</div>
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                <thead>
+                  <tr style={{ background: '#0f172a' }}>
+                    <th style={attrTh}>Player</th>
+                    <th style={attrTh}>Pos</th>
+                    <th style={attrTh}>OVR</th>
+                    <th style={attrTh}>Age</th>
+                    <th style={attrTh}>Pot</th>
+                    <th style={{ ...attrTh, color: '#f87171' }}>Clutch</th>
+                    <th style={{ ...attrTh, color: '#60a5fa' }}>IQ</th>
+                    <th style={{ ...attrTh, color: '#fbbf24' }}>Leadership</th>
+                    <th style={{ ...attrTh, color: '#10b981' }}>Durability</th>
+                    <th style={{ ...attrTh, color: '#a855f7' }}>Work Ethic</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {attrRows.map(p => (
+                    <tr key={p.playerId} style={{ borderBottom: '1px solid #334155' }}>
+                      <td style={attrTd}>{p.name}</td>
+                      <td style={attrTd}>{p.position}</td>
+                      <td style={{ ...attrTd, fontWeight: 600 }}>{p.rating}</td>
+                      <td style={attrTd}>{p.age || '—'}</td>
+                      <td style={attrTd}>{p.potential || '—'}</td>
+                      <AttrCell v={p.clutch} color="#f87171" />
+                      <AttrCell v={p.iq} color="#60a5fa" />
+                      <AttrCell v={p.leadership} color="#fbbf24" />
+                      <AttrCell v={p.durability} color="#10b981" />
+                      <AttrCell v={p.workEthic} color="#a855f7" />
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
       {tab === 'playbook' && (
         <div style={s.panel} data-testid="playbook-panel">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
@@ -487,6 +548,23 @@ export default function TeamManagementPage() {
         </div>
       )}
     </div>
+  );
+}
+
+// Sprint B3 attribute table helpers.
+const attrTh = { padding: '10px 8px', textAlign: 'left', color: '#94a3b8', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5 };
+const attrTd = { padding: '8px', color: '#cbd5e1' };
+function AttrCell({ v, color }) {
+  if (!v) return <td style={attrTd}>—</td>;
+  return (
+    <td style={attrTd}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div style={{ width: 50, height: 6, background: '#0f172a', borderRadius: 3, overflow: 'hidden' }}>
+          <div style={{ width: `${Math.min(100, v)}%`, height: '100%', background: color }} />
+        </div>
+        <span style={{ color, fontWeight: 600, fontSize: 12 }}>{v}</span>
+      </div>
+    </td>
   );
 }
 

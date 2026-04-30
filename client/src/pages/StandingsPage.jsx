@@ -204,6 +204,28 @@ export default function StandingsPage() {
                 background: view === t.k ? '#f97316' : '#334155',
               }}>{t.label}</button>
           ))}
+          <a
+            href={`/api/season/export-csv?type=standings`}
+            onClick={async (e) => {
+              // Use fetch with auth header so the protected endpoint accepts us;
+              // then trigger a blob download client-side.
+              e.preventDefault();
+              try {
+                const res = await fetch('/api/season/export-csv?type=standings', {
+                  headers: { Authorization: `Bearer ${token}` },
+                });
+                if (!res.ok) throw new Error('Export failed');
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url; a.download = `standings-s${standings.seasonNumber || ''}.csv`;
+                a.click(); URL.revokeObjectURL(url);
+              } catch (err) { setError(err.message); }
+            }}
+            style={{ ...styles.viewBtn, background: '#0ea5e9', textDecoration: 'none', display: 'inline-block' }}
+          >
+            ⬇ CSV
+          </a>
         </div>
       )}
 

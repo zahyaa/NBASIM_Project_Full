@@ -13,6 +13,7 @@ const {
   awardRewards,
 } = require('../services/fantasyGM');
 const { ensureRookieClassFor } = require('../services/rookieClass');
+const { assignContract, refreshUserFinance } = require('../services/contracts');
 const router = express.Router();
 
 const STARTING_TOKENS = 500;
@@ -262,7 +263,11 @@ router.post('/pick', auth, async (req, res) => {
       }
     }
 
-    user.team.players.push({ playerId, firstName, lastName, position, rating, stats });
+    user.team.players.push({
+      playerId, firstName, lastName, position, rating, stats,
+      contract: assignContract({ rating }, { isRookie: Number(playerId) >= 20_000_000 }),
+    });
+    refreshUserFinance(user);
 
     // Auto-complete when the user roster is full (15 players).
     if (user.team.players.length >= 15) {
@@ -325,7 +330,7 @@ router.post('/cpu-pick', auth, async (req, res) => {
       position: pick.position,
       rating: pick.rating,
       stats: pick.stats,
-      contract: { years: 1 + Math.floor(Math.random() * 4), salary: Math.round((pick.rating || 70) * 0.5) },
+      contract: assignContract(pick, { isRookie: Number(pick.id) >= 20_000_000 }),
     });
     user.markModified('cpuTeams');
     await user.save();
@@ -393,6 +398,7 @@ router.post('/sim-all', auth, async (req, res) => {
         position: p.position,
         rating: p.rating,
         stats: p.stats,
+        contract: assignContract(p, { isRookie: !!p.isRookie }),
       });
     }
 
@@ -405,6 +411,7 @@ router.post('/sim-all', auth, async (req, res) => {
       excludeIds: Array.from(ownedByUser),
     });
     user.markModified('cpuTeams');
+    refreshUserFinance(user);
 
     user.draftCompleted = true;
     const rewards = awardRewards(user);

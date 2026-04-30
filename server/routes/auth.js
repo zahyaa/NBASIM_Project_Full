@@ -2,6 +2,7 @@ const express = require('express');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const auth = require('../middleware/auth');
+const { refreshUserFinance } = require('../services/contracts');
 const router = express.Router();
 
 // Register
@@ -66,6 +67,9 @@ router.get('/me', auth, async (req, res) => {
     if (!user) return res.status(404).json({ error: 'User not found' });
     // Heartbeat — mark this user as online for the multiplayer lobby.
     user.lastSeenAt = new Date();
+    // Keep finance summary fresh on every poll so the navbar / front office
+    // page always shows the right cap space without a manual refresh.
+    refreshUserFinance(user);
     user.save().catch(() => {});
     res.json(user);
   } catch (err) {

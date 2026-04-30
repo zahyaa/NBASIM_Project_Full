@@ -5,6 +5,13 @@
 const express = require('express');
 const auth = require('../middleware/auth');
 const User = require('../models/User');
+const {
+  assignContract,
+  refreshUserFinance,
+  canAbsorbContract,
+  ROSTER_MAX,
+} = require('../services/contracts');
+const { ensureB3Fields } = require('../services/attributes');
 
 const router = express.Router();
 
@@ -22,12 +29,55 @@ router.get('/', auth, async (req, res) => {
     const user = await User.findById(req.userId);
     if (!user) return res.status(404).json({ error: 'User not found' });
     if (!requireDraftStarted(user, res)) return;
+    // Sprint B3 — backfill attribute ratings on the user's roster so the
+    // /attributes endpoint and Team UI surface real numbers immediately.
+    let mutated = false;
+    for (const p of (user.team?.players || [])) {
+      if (ensureB3Fields(p)) mutated = true;
+    }
+    if (mutated) {
+      user.markModified('team');
+      await user.save();
+    }
     res.json({
       team: user.team,
       tokens: user.tokens,
       cpuTeams: user.cpuTeams,
       injuries: user.team.players.filter(p => p.injured),
     });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/team/attributes — Sprint B3 attribute card per roster player.
+router.get('/attributes', auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    if (!requireDraftStarted(user, res)) return;
+    let mutated = false;
+    const rows = (user.team?.players || []).map(p => {
+      if (ensureB3Fields(p)) mutated = true;
+      return {
+        playerId: p.playerId,
+        name: `${p.firstName} ${p.lastName}`,
+        position: p.position,
+        rating: p.rating,
+        age: p.age || null,
+        potential: p.potential || null,
+        clutch: p.clutch,
+        iq: p.iq,
+        leadership: p.leadership,
+        durability: p.durability || null,
+        workEthic: p.workEthic || null,
+      };
+    });
+    if (mutated) {
+      user.markModified('team');
+      await user.save();
+    }
+    res.json({ players: rows });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -74,6 +124,22 @@ router.post('/sign', auth, async (req, res) => {
       return res.status(400).json({ error: 'Player is not a free agent' });
     }
 
+    // Sprint A2 — cap legality. Use the supplied contract or generate one
+    // from the player's rating, then make sure the team can absorb it.
+    const contract = player.contract || assignContract(player);
+    refreshUserFinance(user);
+    const check = canAbsorbContract({
+      team: user.team,
+      finance: user.finance,
+      newSalary: contract.salary,
+    });
+    if (!check.ok) {
+      return res.status(400).json({ error: check.reason });
+    }
+    if (check.requiresMLE) {
+      user.finance.midLevelExceptionAvailable = false;
+    }
+
     user.team.players.push({
       playerId: Number(player.playerId),
       firstName: player.firstName,
@@ -81,11 +147,17 @@ router.post('/sign', auth, async (req, res) => {
       position: player.position,
       rating: player.rating,
       stats: player.stats,
-      contract: player.contract || { years: 1, salary: Math.round((player.rating || 70) * 0.4) },
+      contract,
     });
     user.markModified('team');
+    refreshUserFinance(user);
     await user.save();
-    res.json({ message: 'Player signed', team: user.team });
+    res.json({
+      message: check.requiresMLE ? 'Signed via mid-level exception' : 'Player signed',
+      team: user.team,
+      finance: user.finance,
+      usedMLE: check.requiresMLE,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -105,8 +177,9 @@ router.post('/release', auth, async (req, res) => {
       return res.status(404).json({ error: 'Player not on roster' });
     }
     user.markModified('team');
+    refreshUserFinance(user);
     await user.save();
-    res.json({ message: 'Player released', team: user.team });
+    res.json({ message: 'Player released', team: user.team, finance: user.finance });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

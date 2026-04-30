@@ -12,6 +12,12 @@ const auth = require('../middleware/auth');
 const User = require('../models/User');
 const Game = require('../models/Game');
 const { simulateGame } = require('../services/simulation');
+const { assignContract, refreshUserFinance, rolloverOffseason } = require('../services/contracts');
+const { runProgression } = require('../services/progression');
+const {
+  rollInjuries, tickRecovery, buildSimRoster, detectBackToBack,
+  injuryNewsLine, returnNewsLine,
+} = require('../services/injuries');
 const {
   generateSchedule,
   quickSimRecord,
@@ -29,7 +35,8 @@ const CPU_DEF = ['Man-to-Man', 'Switch 1-5', '2-3 Zone', '3-2 Zone', 'Drop Cover
 function sanitizePlayCall(pc) {
   if (!pc || typeof pc !== 'object') return {};
   const trim = (s) => (typeof s === 'string' && s.trim() ? s.trim().slice(0, 60) : null);
-  return { offensive: trim(pc.offensive), defensive: trim(pc.defensive) };
+  // Sprint C2 — `press` toggle enables full-court pressure.
+  return { offensive: trim(pc.offensive), defensive: trim(pc.defensive), press: !!pc.press };
 }
 function randomCpuPlayCall() {
   return {
@@ -164,7 +171,7 @@ function ensureCpuRosters(user, minPlayers = 15) {
         lastName: `Player ${i}`,
         position: ['G', 'F', 'C'][i % 3],
         rating: 60 + Math.floor(Math.random() * 20),
-        contract: { years: 1, salary: 35 },
+        contract: assignContract({ rating: 65 }),
       });
       modified = true;
     }
@@ -217,21 +224,57 @@ router.post('/play-next', auth, async (req, res) => {
     const cpu = user.cpuTeams.find(t => t.name === game.opponent);
     if (!cpu) return res.status(500).json({ error: `Scheduled opponent "${game.opponent}" not found` });
 
+    // Sprint B2 — pre-game injury rolls (user + opponent). Roll BEFORE
+    // applyLineup so injured players are excluded from the active five.
+    const userTeamRef = { name: user.team.name, players: user.team.players };
+    const cpuTeamRef = { name: cpu.name, players: cpu.players };
+    const newUserInjuries = rollInjuries(userTeamRef);
+    const newCpuInjuries = rollInjuries(cpuTeamRef);
+    user.markModified('team');
+    user.markModified('cpuTeams');
+
+    // Sprint B2 — back-to-back fatigue. If the prior played game is on
+    // the calendar day immediately before this one, both teams take -3%.
+    const prevPlayed = [...user.schedule].reverse().find(g => g.played && g.gameDate);
+    const isB2B = detectBackToBack(game.gameDate, prevPlayed && prevPlayed.gameDate);
+
     // Real simulation with full play-by-play / stats / shots / leaders.
     // applyLineup() puts the user's chosen starting 5 at the front so they
     // are the active unit in the simulation.
     const userPlayCall = sanitizePlayCall(req.body && req.body.playCall);
     const cpuPlayCall = randomCpuPlayCall();
-    const result = simulateGame(
-      applyLineup({ name: user.team.name, players: user.team.players, coachRating: 7 }),
-      { name: cpu.name, players: cpu.players, coachRating: cpu.coachRating },
-      {
-        difficulty: user.difficulty,
-        userSide: 'A',
-        playCallA: userPlayCall,
-        playCallB: cpuPlayCall,
-      }
+
+    // Sprint C3 — apply rotation/pace/defensive assignments + coachInfo.
+    const { ensureC3Fields, applyRotation } = require('../services/coaching');
+    ensureC3Fields(user);
+    const userPlayersAfterRotation = applyRotation(user.team.players, user.coaching?.rotation);
+
+    const userSim = buildSimRoster(
+      applyLineup({
+        name: user.team.name,
+        players: userPlayersAfterRotation,
+        coachRating: 7,
+        coachInfo: user.team.coachInfo,
+      }),
+      { isBackToBack: isB2B }
     );
+    const cpuSim = buildSimRoster(
+      { name: cpu.name, players: cpu.players, coachRating: cpu.coachRating, coachInfo: cpu.coachInfo },
+      { isBackToBack: isB2B }
+    );
+    const result = simulateGame(userSim, cpuSim, {
+      difficulty: user.difficulty,
+      userSide: 'A',
+      homeSide: game.isHome ? 'A' : 'B',
+      playCallA: userPlayCall,
+      playCallB: cpuPlayCall,
+      pressA: !!userPlayCall.press,
+      pressB: Math.random() < 0.15, // CPU presses ~15% of games
+      paceA: user.coaching?.pace || 'medium',
+      paceB: cpu.coachInfo?.preferredPace || 'medium',
+      defensiveAssignmentsA: user.coaching?.defensiveAssignments || [],
+      defensiveAssignmentsB: [],
+    });
 
     const userWon = result.winner === user.team.name;
     game.played = true;
@@ -271,7 +314,19 @@ router.post('/play-next', auth, async (req, res) => {
     await gameDoc.save();
     user.gamesPlayed.push(gameDoc._id);
 
-    // Push an AI-style headline summarizing this game.
+    // Sprint B2 — tick injury recovery and push injury news first so the
+    // game recap (pushed last) ends up at news[0] for the post-game UI.
+    const userReturned = tickRecovery(userTeamRef);
+    const cpuReturned = tickRecovery(cpuTeamRef);
+    user.markModified('team');
+    user.markModified('cpuTeams');
+    for (const inj of newUserInjuries) pushNews(user, injuryNewsLine(inj));
+    for (const inj of newCpuInjuries) pushNews(user, injuryNewsLine(inj));
+    for (const ret of userReturned) pushNews(user, returnNewsLine(ret));
+    // CPU returns are noisier — only push for star-ish names (skip for now).
+    void cpuReturned;
+
+    // Push the game recap LAST so it sits at news[0] (newest first).
     pushNews(user, gameRecap({ result, userTeam: user.team.name, seasonNumber: user.seasonNumber }));
 
     // Around the trade deadline (~game 50) drop a few rumor headlines once.
@@ -286,6 +341,23 @@ router.post('/play-next', auth, async (req, res) => {
     // CPU front office develops their rosters — makes the league harder
     // as the season progresses.
     cpuFrontOfficeTick(user);
+
+    // Sprint A4 — every 8 games, give the CPU a chance to ping the user
+    // with a trade proposal. Skipped automatically past the deadline.
+    const playedSoFar = (user.schedule || []).filter(g => g.played).length;
+    if (playedSoFar > 0 && playedSoFar % 8 === 0) {
+      try { require('../services/trades').generateCpuProposals(user); } catch (_) {}
+    }
+
+    // Sprint E1/E2 — periodic CPU front-office moves: react to long-term
+    // injuries (every 10 games) and chip away at the FA pool every game.
+    try {
+      const cpuFO = require('../services/cpuFrontOffice');
+      cpuFO.cpuFreeAgentTick(user, { rate: 0.06 });
+      if (playedSoFar > 0 && playedSoFar % 10 === 0) {
+        cpuFO.cpuReactToInjuries(user);
+      }
+    } catch (_) {}
 
     // If this was the user's 82nd (final) game, top up every CPU team to
     // 82 games so the final standings reflect a complete league season.
@@ -303,6 +375,11 @@ router.post('/play-next', auth, async (req, res) => {
       tokensAwarded: rewards.tokensAwarded,
       newAchievements: rewards.newAchievements,
       tokens: user.tokens,
+      injuries: {
+        new: [...newUserInjuries, ...newCpuInjuries],
+        returned: userReturned,
+        backToBack: isB2B,
+      },
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -513,6 +590,22 @@ router.post('/advance', auth, async (req, res) => {
       playoffResult,
     });
 
+    // Sprint D1 — compute season awards before the league rolls over
+    // (rosters are about to churn via offseason). Saved on
+    // user.seasonAwards (current) and pushed onto user.careerAwards[].
+    try {
+      const { computeSeasonAwards } = require('../services/awards');
+      const awards = computeSeasonAwards(user);
+      if (awards) {
+        user.seasonAwards = awards;
+        user.careerAwards.push(awards);
+        user.markModified('seasonAwards');
+        user.markModified('careerAwards');
+      }
+    } catch (err) {
+      console.error('Awards computation failed:', err.message);
+    }
+
     // Reset playoffs + all-star + trade rumor flag for the new season.
     user.playoffs = { started: false, completed: false, seasonNumber: 0, rounds: [], champion: '', runnerUp: '' };
     user.allStar  = { seasonNumber: 0, voted: false, eastRoster: [], westRoster: [], threePointWinner: '', dunkWinner: '', skillsWinner: '', gameMVP: '', eastScore: 0, westScore: 0 };
@@ -529,6 +622,24 @@ router.post('/advance', auth, async (req, res) => {
       });
     }
 
+    // Sprint C3 — Coach of the Year. Computed BEFORE seasonWins reset.
+    try {
+      const { coachOfTheYear } = require('../services/coaching');
+      const coty = coachOfTheYear({ user, userWins: user.seasonWins });
+      if (coty) {
+        user.coachOfTheYearHistory = user.coachOfTheYearHistory || [];
+        user.coachOfTheYearHistory.push({
+          season: user.seasonNumber,
+          coachName: coty.coachName,
+          teamName: coty.teamName,
+          wins: coty.wins,
+          expectedWins: coty.expectedWins,
+          delta: coty.delta,
+        });
+        user.markModified('coachOfTheYearHistory');
+      }
+    } catch (_) {}
+
     user.seasonNumber += 1;
     user.season += 1;
     user.seasonWins = 0;
@@ -539,6 +650,59 @@ router.post('/advance', auth, async (req, res) => {
     });
     user.cpuRecords = user.cpuTeams.map(t => ({ name: t.name, wins: 0, losses: 0 }));
 
+    // Sprint E1 — let CPU teams re-sign their own stars BEFORE the
+    // generic rollover converts everyone to free agents.
+    try {
+      const cpuFO = require('../services/cpuFrontOffice');
+      cpuFO.cpuReSignStars(user);
+    } catch (_) {}
+
+    // Sprint A2 — offseason contract rollover. Decrement every contract,
+    // expired ones become free agents, salary cap escalates.
+    const rolloverInfo = rolloverOffseason(user);
+
+    // Sprint E1 — recompute each CPU's strategic direction based on the
+    // season we just closed (record + roster age).
+    try {
+      const cpuFO = require('../services/cpuFrontOffice');
+      cpuFO.updateCpuDirections(user);
+    } catch (_) {}
+
+    // Sprint E2 — clear last season's play-in results so the next
+    // postseason starts from a clean slate.
+    user.playInResults = null;
+
+    // Sprint C3 — coach contract: decrement years remaining for user + CPUs.
+    try {
+      const { ensureC3Fields } = require('../services/coaching');
+      ensureC3Fields(user);
+      if (user.team.coachInfo && user.team.coachInfo.yearsRemaining > 0) {
+        user.team.coachInfo.yearsRemaining = Math.max(0, user.team.coachInfo.yearsRemaining - 1);
+      }
+      for (const cpu of user.cpuTeams || []) {
+        if (cpu.coachInfo && cpu.coachInfo.yearsRemaining > 0) {
+          cpu.coachInfo.yearsRemaining = Math.max(0, cpu.coachInfo.yearsRemaining - 1);
+        }
+      }
+      user.markModified('team');
+      user.markModified('cpuTeams');
+    } catch (_) {}
+
+    // Sprint B1 — run progression on every roster, then store the report
+    // so the user can review who improved / regressed / broke out / busted.
+    const report = runProgression(user);
+    user.lastDevelopmentReport = {
+      seasonNumber: user.seasonNumber - 1,
+      generatedAt: new Date(),
+      breakouts: report.breakouts,
+      busts: report.busts,
+      biggestRisers: report.biggestRisers,
+      biggestFallers: report.biggestFallers,
+      userReport: report.userReport,
+      totalPlayers: report.totalPlayers,
+    };
+    user.markModified('lastDevelopmentReport');
+
     const rewards = awardRewards(user);
     await user.save();
     res.json({
@@ -548,6 +712,12 @@ router.post('/advance', auth, async (req, res) => {
       career: user.career,
       tokensAwarded: rewards.tokensAwarded,
       newAchievements: rewards.newAchievements,
+      offseason: rolloverInfo,
+      development: {
+        breakouts: report.breakouts.length,
+        busts: report.busts.length,
+        totalPlayers: report.totalPlayers,
+      },
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -567,6 +737,119 @@ router.get('/career', auth, async (req, res) => {
       achievements: user.achievements,
       tokens: user.tokens,
     });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/season/progression — Sprint B1 development report from the
+// last offseason rollover. Empty until /advance has been called once.
+router.get('/progression', auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    res.json({
+      report: user.lastDevelopmentReport || null,
+      currentSeason: user.seasonNumber,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/season/injuries — Sprint B2 league-wide injury report.
+router.get('/injuries', auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    const collect = (team) => (team?.players || [])
+      .filter(p => (p.injury && p.injury.isInjured) || p.injured)
+      .map(p => ({
+        playerId: p.playerId,
+        name: `${p.firstName} ${p.lastName}`,
+        position: p.position,
+        rating: p.rating,
+        team: team.name,
+        isUserTeam: team === user.team,
+        injuryType: (p.injury && p.injury.injuryType) || 'Day-to-day',
+        gamesRemaining: (p.injury && p.injury.gamesRemaining) || 0,
+        severity: (p.injury && p.injury.severity) || 'minor',
+      }));
+    const userInjuries = collect(user.team);
+    const cpuInjuries = (user.cpuTeams || []).flatMap(collect);
+    const all = [...userInjuries, ...cpuInjuries].sort(
+      (a, b) => b.gamesRemaining - a.gamesRemaining
+    );
+    res.json({
+      total: all.length,
+      userTeamCount: userInjuries.length,
+      injuries: all,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/season/export-csv?type=standings|roster|schedule — Sprint I.
+// Returns a text/csv attachment so the user can drop their season into a
+// spreadsheet. Falls back to standings if `type` is missing or unknown.
+router.get('/export-csv', auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    if (!requireDraftCompleted(user, res)) return;
+
+    const type = String(req.query.type || 'standings').toLowerCase();
+    const escape = (v) => {
+      if (v === null || v === undefined) return '';
+      const s = String(v);
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const toCsv = (headers, rows) =>
+      [headers.join(','), ...rows.map(r => r.map(escape).join(','))].join('\n');
+
+    let csv = '';
+    let filename = `nbasim-${type}-s${user.seasonNumber}.csv`;
+
+    if (type === 'roster') {
+      const headers = ['firstName', 'lastName', 'position', 'rating', 'salary', 'years', 'inLineup'];
+      const rows = (user.team?.players || []).map(p => [
+        p.firstName, p.lastName, p.position, p.rating,
+        p.contract?.salary || 0, p.contract?.yearsRemaining || 0,
+        p.inLineup ? 1 : 0,
+      ]);
+      csv = toCsv(headers, rows);
+    } else if (type === 'schedule') {
+      const headers = ['gameNumber', 'opponent', 'played', 'win', 'scoreUser', 'scoreOpp'];
+      const rows = (user.schedule || []).map((g, i) => [
+        i + 1, g.opponent, g.played ? 1 : 0,
+        g.played ? (g.win ? 1 : 0) : '',
+        g.played ? g.scoreUser : '', g.played ? g.scoreOpp : '',
+      ]);
+      csv = toCsv(headers, rows);
+    } else {
+      // standings (default)
+      const rows = [{
+        name: user.team?.name || 'My Team', city: user.team?.city || '',
+        conference: user.conference, division: user.team?.division || '',
+        wins: user.seasonWins, losses: user.seasonLosses, isUser: 1,
+      }];
+      for (const t of user.cpuTeams || []) {
+        const rec = (user.cpuRecords || []).find(r => r.name === t.name) || { wins: 0, losses: 0 };
+        rows.push({
+          name: t.name, city: t.city, conference: t.conference, division: t.division,
+          wins: rec.wins, losses: rec.losses, isUser: 0,
+        });
+      }
+      rows.sort((a, b) => (b.wins - a.wins) || (a.losses - b.losses));
+      const headers = ['rank', 'name', 'city', 'conference', 'division', 'wins', 'losses', 'isUser'];
+      csv = toCsv(headers, rows.map((r, i) => [i + 1, r.name, r.city, r.conference, r.division, r.wins, r.losses, r.isUser]));
+      filename = `nbasim-standings-s${user.seasonNumber}.csv`;
+    }
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(csv);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

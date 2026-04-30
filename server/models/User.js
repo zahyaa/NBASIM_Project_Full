@@ -8,13 +8,43 @@ const playerSlotSchema = new mongoose.Schema({
   position: String,
   rating: Number,
   stats: Object,
+  // Sprint B1 — age + potential drive offseason progression. Backfilled
+  // automatically by services/progression.js#ensureB1Fields when missing.
+  age: { type: Number, default: 0 },
+  potential: { type: Number, default: 0 },
+  workEthic: { type: Number, default: 0 },
+  // Sprint B3 — gameplay attributes. Lazily backfilled by
+  // services/attributes.js#ensureB3Fields when missing so old saves work.
+  clutch: { type: Number, default: 0 },     // late-game shot bump
+  iq: { type: Number, default: 0 },         // assists / turnover discipline
+  leadership: { type: Number, default: 0 }, // team chemistry modifier
+  // Sprint B2 — injury system. `injured` + `injuryDaysRemaining` are
+  // legacy mirrors kept in sync by services/injuries.js so old code paths
+  // (Store heal item, team/injuries view) keep working.
+  durability: { type: Number, default: 0 },
+  gamesSinceReturn: { type: Number, default: 99 }, // 99 = no recent return
+  injury: {
+    isInjured: { type: Boolean, default: false },
+    injuryType: { type: String, default: null },
+    gamesRemaining: { type: Number, default: 0 },
+    severity: { type: String, default: null }, // minor | moderate | major | season-ending
+  },
   // Team Management additions
   inLineup: { type: Boolean, default: false }, // starter flag
   injured: { type: Boolean, default: false },
   injuryDaysRemaining: { type: Number, default: 0 },
+  // Sprint A1: full contract object. `years` retained for legacy reads;
+  // `yearsRemaining` is the authoritative count and decrements at season
+  // rollover. Salary is in millions.
   contract: {
-    years: { type: Number, default: 0 },
-    salary: { type: Number, default: 0 }, // in millions
+    salary: { type: Number, default: 0 },
+    yearsRemaining: { type: Number, default: 0 },
+    years: { type: Number, default: 0 },                 // legacy mirror
+    contractType: { type: String, default: 'minimum' }, // rookie | minimum | standard | max
+    teamOption: { type: Boolean, default: false },
+    playerOption: { type: Boolean, default: false },
+    noTradeClause: { type: Boolean, default: false },
+    signedAt: { type: Date, default: Date.now },
   },
   // Cumulative boosts applied via Store items
   boost: {
@@ -22,6 +52,31 @@ const playerSlotSchema = new mongoose.Schema({
     defense: { type: Number, default: 0 },
     athleticism: { type: Number, default: 0 },
   },
+}, { _id: false });
+
+// Sprint A4 — draft pick asset. Owned by either user.team or a cpuTeam.
+// `originalTeam` records who the pick originally belonged to so we can
+// label conveyed picks ("via Lakers"). `protected` is informational.
+const draftPickSchema = new mongoose.Schema({
+  pickId: { type: String, required: true },     // e.g. "2026-R1-LAL"
+  year: { type: Number, required: true },       // calendar year of draft
+  round: { type: Number, required: true },      // 1 or 2
+  originalTeam: { type: String, default: '' },  // team city/name that owned it first
+  protectedTop: { type: Number, default: 0 },   // 0 = unprotected, 5 = top-5 protected, etc.
+  estimatedValue: { type: Number, default: 0 }, // 0..100 — used by CPU acceptance scoring
+}, { _id: false });
+
+// Sprint C3 — coach subdocument shared by user.team and cpuTeam.
+const coachInfoSchema = new mongoose.Schema({
+  name: { type: String, default: '' },
+  offenseRating: { type: Number, default: 70 },
+  defenseRating: { type: Number, default: 70 },
+  developmentRating: { type: Number, default: 70 },
+  style: { type: String, default: 'balanced' }, // offensive | defensive | balanced | developmental
+  salary: { type: Number, default: 4 },         // $M / year
+  yearsRemaining: { type: Number, default: 1 },
+  age: { type: Number, default: 50 },
+  preferredPace: { type: String, default: '' }, // optional override
 }, { _id: false });
 
 // CPU-controlled team generated when the user starts a fantasy draft.
@@ -36,6 +91,13 @@ const cpuTeamSchema = new mongoose.Schema({
   division: String,             // 'Atlantic', 'Central', etc.
   marketTier: String,           // 'I', 'II', 'III'
   players: [playerSlotSchema],
+  // Sprint A4 — picks owned + team strategic direction. `direction`
+  // drives CPU trade acceptance scoring (rebuild values youth+picks,
+  // contender values veteran wins now).
+  ownedPicks: { type: [draftPickSchema], default: [] },
+  direction: { type: String, default: 'middling' }, // contender | middling | rebuild | tank
+  // Sprint C3 — full coach subdoc.
+  coachInfo: { type: coachInfoSchema, default: () => ({}) },
 }, { _id: false });
 
 // Store inventory entry (an item the user has purchased and applied).
@@ -76,6 +138,9 @@ const userSchema = new mongoose.Schema({
     marketTier: { type: String, default: '' }, // 'I' | 'II' | 'III'
     division: { type: String, default: '' },   // Atlantic, Central, etc.
     players: [playerSlotSchema],
+    // Sprint C3 — full coach subdoc. `coach` (string) is kept for legacy
+    // reads; coachInfo.name is authoritative once backfilled.
+    coachInfo: { type: coachInfoSchema, default: () => ({}) },
   },
 
   // Conference & league selection
@@ -164,6 +229,22 @@ const userSchema = new mongoose.Schema({
     rounds: { type: Array, default: [] },
     champion: { type: String, default: '' },
     runnerUp: { type: String, default: '' },
+  },
+
+  // Sprint E2 — Play-In Tournament results (seeds 7-10 per conference).
+  // Populated by /api/playoffs/play-in before /start. Cleared each season.
+  playInResults: { type: Object, default: null },
+
+  // Sprint E2 — weekly power rankings snapshot history.
+  powerRankingsHistory: {
+    type: [{
+      _id: false,
+      seasonNumber: Number,
+      week: Number,
+      generatedAt: { type: Date, default: Date.now },
+      rankings: { type: Array, default: [] },
+    }],
+    default: [],
   },
 
   // -------------------------- AI News Feed --------------------------
@@ -309,6 +390,157 @@ const userSchema = new mongoose.Schema({
     }],
     default: [],
   },
+
+  // -------------------------- Front Office (Sprint A1) --------------------------
+  // Salary cap / payroll / luxury tax for the user's franchise. Refreshed
+  // via refreshUserFinance() any time the roster changes.
+  finance: {
+    salaryCap: { type: Number, default: 140 },
+    luxuryTaxLine: { type: Number, default: 170 },
+    payroll: { type: Number, default: 0 },
+    capSpace: { type: Number, default: 140 },
+    taxAmount: { type: Number, default: 0 },
+    midLevelExceptionAvailable: { type: Boolean, default: true },
+  },
+
+  // -------------------------- Free Agency (Sprint A2) --------------------------
+  // League-wide free-agent pool. Populated at offseason rollover from
+  // expiring contracts; users sign from here via /api/frontoffice/sign.
+  freeAgents: {
+    type: [{
+      _id: false,
+      playerId: { type: Number },
+      firstName: String,
+      lastName: String,
+      position: String,
+      rating: Number,
+      stats: Object,
+      previousTeam: String,
+      askingSalary: Number,    // millions
+      askingYears: Number,
+      expiredAt: { type: Date, default: Date.now },
+    }],
+    default: [],
+  },
+
+  // Sprint A3 — pending offers per free agent. Each entry tracks all
+  // bids on one player (user + 0-3 CPU). Resolved by /resolve route.
+  freeAgentOffers: {
+    type: [{
+      _id: false,
+      playerId: Number,
+      offers: [{
+        _id: false,
+        teamName: String,
+        teamCity: String,
+        salary: Number,
+        years: Number,
+        isUser: Boolean,
+        usesMLE: { type: Boolean, default: false },
+        teamWinsLastSeason: { type: Number, default: 30 },
+        marketTier: { type: String, default: 'III' },
+      }],
+      createdAt: { type: Date, default: Date.now },
+    }],
+    default: [],
+  },
+
+  // Sprint B1 — most recent offseason development report. Stored so the
+  // UI can show last season's progressions/regressions until the next
+  // rollover overwrites it.
+  lastDevelopmentReport: {
+    type: {
+      seasonNumber: Number,
+      generatedAt: { type: Date, default: Date.now },
+      breakouts: { type: Array, default: [] },
+      busts: { type: Array, default: [] },
+      biggestRisers: { type: Array, default: [] },
+      biggestFallers: { type: Array, default: [] },
+      userReport: { type: Array, default: [] },
+      totalPlayers: Number,
+    },
+    default: null,
+  },
+
+  // -------------------------- Trades (Sprint A4) --------------------------
+  // Draft picks owned by the user's franchise. Backfilled by
+  // services/trades.js#ensureA4Fields when missing.
+  ownedPicks: { type: [draftPickSchema], default: [] },
+  // Completed trades log (newest last). Each entry stores both sides.
+  tradeHistory: {
+    type: [{
+      _id: false,
+      tradeId: String,
+      executedAt: { type: Date, default: Date.now },
+      partnerTeam: String,                              // CPU team name
+      sentPlayers: { type: Array, default: [] },        // [{playerId, firstName, lastName, salary}]
+      sentPicks:   { type: Array, default: [] },        // [{pickId,year,round}]
+      receivedPlayers: { type: Array, default: [] },
+      receivedPicks:   { type: Array, default: [] },
+      initiatedBy: { type: String, default: 'user' },   // 'user' | 'cpu'
+    }],
+    default: [],
+  },
+  // CPU-initiated trade proposals waiting on the user. Created by the
+  // periodic cpuFrontOfficeTick. User accepts/rejects via /trade/respond.
+  cpuTradeProposals: {
+    type: [{
+      _id: false,
+      proposalId: String,
+      createdAt: { type: Date, default: Date.now },
+      partnerTeam: String,
+      // From the user's perspective:
+      sendPlayerIds: { type: [Number], default: [] },
+      sendPickIds:   { type: [String], default: [] },
+      receivePlayers: { type: Array, default: [] },     // snapshot of CPU players
+      receivePicks:   { type: Array, default: [] },
+      message: { type: String, default: '' },
+    }],
+    default: [],
+  },
+
+  // -------------------------- Coaching (Sprint C3) --------------------------
+  // User-controlled rotation/pace/defensive-assignments. Backfilled by
+  // services/coaching.js#ensureC3Fields the first time it's read.
+  coaching: {
+    rotation: {
+      type: [{ _id: false, playerId: Number, targetMinutes: Number }],
+      default: [],
+    },
+    pace: { type: String, default: 'medium' }, // slow | medium | fast
+    defensiveAssignments: {
+      type: [{ _id: false, defenderId: Number, opponentScorerId: Number }],
+      default: [],
+    },
+  },
+  // Coach-of-the-Year winners across seasons.
+  coachOfTheYearHistory: {
+    type: [{
+      _id: false,
+      season: Number,
+      coachName: String,
+      teamName: String,
+      wins: Number,
+      expectedWins: Number,
+      delta: Number,
+    }],
+    default: [],
+  },
+
+  // -------------------------- Awards & Records (Sprint D) --------------------------
+  // Most recently computed season awards (MVP / DPOY / ROY / 6MOY / MIP /
+  // All-NBA / All-Defensive / All-Rookie + league leaders + per-player
+  // synthetic stat lines). Stored loosely so the awards service can evolve
+  // without schema migrations.
+  seasonAwards: { type: Object, default: null },
+
+  // Awards from every completed season. Each entry mirrors `seasonAwards`
+  // and is appended in /api/season/advance.
+  careerAwards: { type: [Object], default: [] },
+
+  // Hall of Fame inductees (computed lazily by /api/records/hall-of-fame).
+  // Cached here so the page doesn't recompute every request.
+  hallOfFame: { type: [Object], default: [] },
 
   createdAt: { type: Date, default: Date.now },
 });

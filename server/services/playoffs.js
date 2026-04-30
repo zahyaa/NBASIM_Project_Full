@@ -220,4 +220,156 @@ function userPlayoffResult(rounds, userTeamName) {
   return 'missed';
 }
 
-module.exports = { buildBracket, playSeries, advanceBracket, simulateAll, userPlayoffResult, teamRecord, ROUND_NAMES };
+// ----------------------------------------------------- Sprint E2 Play-In
+
+/**
+ * Build the play-in pool: seeds 7-10 in each conference. Returns
+ *   { east: [{seed,name,wins,losses}], west: [...] }
+ */
+function buildPlayInPool(user) {
+  const all = [];
+  all.push({
+    name: user.team.name || 'My Team',
+    conference: user.conference,
+    wins: user.seasonWins, losses: user.seasonLosses,
+    isUser: true,
+  });
+  for (const t of user.cpuTeams || []) {
+    const rec = (user.cpuRecords || []).find(r => r.name === t.name) || { wins: 0, losses: 0 };
+    all.push({ name: t.name, conference: t.conference, wins: rec.wins, losses: rec.losses, isUser: false });
+  }
+  const sorted = (conf) => all
+    .filter(t => t.conference === conf)
+    .sort((a, b) => (b.wins - a.wins) || (a.losses - b.losses))
+    .slice(6, 10) // seeds 7-10
+    .map((t, i) => ({ ...t, seed: i + 7 }));
+  return { east: sorted('East'), west: sorted('West') };
+}
+
+/**
+ * Simulate the play-in tournament for one conference. Format:
+ *   Game 1: 7 vs 8 (winner = seed 7, advances)
+ *   Game 2: 9 vs 10 (loser eliminated)
+ *   Game 3: Game1 loser vs Game2 winner (winner = seed 8)
+ * Returns { seed7, seed8, games: [...] }.
+ */
+function simulatePlayInConference(user, pool, rng = Math.random) {
+  if (!pool || pool.length < 4) {
+    // Not enough teams (e.g. small test league) — fall back to seeds as-is.
+    return {
+      seed7: pool?.[0] || null,
+      seed8: pool?.[1] || null,
+      games: [],
+    };
+  }
+  const [s7, s8, s9, s10] = pool;
+  const games = [];
+
+  function singleGame(label, A, B) {
+    const teamA = teamObject(user, A.name) || { name: A.name, players: [] };
+    const teamB = teamObject(user, B.name) || { name: B.name, players: [] };
+    const userSide = teamA.name === user.team?.name ? 'A'
+      : teamB.name === user.team?.name ? 'B' : null;
+    const r = quickSimRecord(teamA, teamB, rng, { difficulty: user.difficulty, userSide });
+    const winner = r.winner === 'A' ? A : B;
+    const loser  = r.winner === 'A' ? B : A;
+    games.push({ label, teamA: A.name, teamB: B.name, scoreA: r.scoreA, scoreB: r.scoreB, winner: winner.name });
+    return { winner, loser };
+  }
+
+  // Game 1: 7 vs 8
+  const g1 = singleGame('7 vs 8', s7, s8);
+  // Game 2: 9 vs 10
+  const g2 = singleGame('9 vs 10', s9, s10);
+  // Game 3: Game1 loser vs Game2 winner
+  const g3 = singleGame('Loser G1 vs Winner G2', g1.loser, g2.winner);
+
+  return { seed7: g1.winner, seed8: g3.winner, games };
+}
+
+/**
+ * Run the full play-in (both conferences) and store results on the user.
+ * Returns { east: {seed7,seed8,games}, west: {...} }.
+ */
+function runPlayIn(user, rng = Math.random) {
+  const pool = buildPlayInPool(user);
+  const east = simulatePlayInConference(user, pool.east, rng);
+  const west = simulatePlayInConference(user, pool.west, rng);
+  user.playInResults = {
+    seasonNumber: user.seasonNumber,
+    east, west,
+    completedAt: new Date(),
+  };
+  user.markModified('playInResults');
+  return user.playInResults;
+}
+
+/**
+ * Build the playoff bracket using play-in results when available. Top 6
+ * seeds come straight from the standings; seeds 7 and 8 come from
+ * `user.playInResults` (or fall back to standings if play-in skipped).
+ */
+function buildBracketWithPlayIn(user) {
+  const playIn = user.playInResults;
+  if (!playIn || playIn.seasonNumber !== user.seasonNumber) return buildBracket(user);
+
+  const all = [];
+  all.push({
+    name: user.team.name || 'My Team',
+    conference: user.conference,
+    wins: user.seasonWins, losses: user.seasonLosses,
+    isUser: true,
+  });
+  for (const t of user.cpuTeams) {
+    const rec = (user.cpuRecords || []).find(r => r.name === t.name) || { wins: 0, losses: 0 };
+    all.push({ name: t.name, conference: t.conference, wins: rec.wins, losses: rec.losses, isUser: false });
+  }
+
+  const top6 = (conf) => all
+    .filter(t => t.conference === conf)
+    .sort((a, b) => (b.wins - a.wins) || (a.losses - b.losses))
+    .slice(0, 6)
+    .map((t, i) => ({ ...t, seed: i + 1 }));
+
+  const east6 = top6('East');
+  const west6 = top6('West');
+  const east = [
+    ...east6,
+    { ...(playIn.east?.seed7 || {}), seed: 7 },
+    { ...(playIn.east?.seed8 || {}), seed: 8 },
+  ];
+  const west = [
+    ...west6,
+    { ...(playIn.west?.seed7 || {}), seed: 7 },
+    { ...(playIn.west?.seed8 || {}), seed: 8 },
+  ];
+
+  function makeFirstRound(seeds, conference) {
+    return [
+      { conference, teamA: seeds[0], teamB: seeds[7] },
+      { conference, teamA: seeds[3], teamB: seeds[4] },
+      { conference, teamA: seeds[1], teamB: seeds[6] },
+      { conference, teamA: seeds[2], teamB: seeds[5] },
+    ].map(s => ({ ...s, winsA: 0, winsB: 0, winner: '', results: [] }));
+  }
+
+  return [
+    { name: ROUND_NAMES[0], series: [...makeFirstRound(east, 'East'), ...makeFirstRound(west, 'West')] },
+    { name: ROUND_NAMES[1], series: [] },
+    { name: ROUND_NAMES[2], series: [] },
+    { name: ROUND_NAMES[3], series: [] },
+  ];
+}
+
+module.exports = {
+  buildBracket,
+  buildBracketWithPlayIn,
+  buildPlayInPool,
+  runPlayIn,
+  playSeries,
+  advanceBracket,
+  simulateAll,
+  userPlayoffResult,
+  teamRecord,
+  ROUND_NAMES,
+};

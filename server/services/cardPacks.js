@@ -42,6 +42,8 @@ function eligibleForTier(pool, tier, claimedIds) {
   return pool.filter(p => !claimedIds.has(p.id));
 }
 
+const { assignContract } = require('./contracts');
+
 // Open one pack: pick 5 random unique players from the eligible subset,
 // weighted slightly toward the top of the tier's rating window so higher
 // tiers feel meaningfully better. Mutates `claimedIds` so two packs in
@@ -84,6 +86,7 @@ function toRosterEntry(p) {
     position: p.position || 'F',
     rating: p.rating || 65,
     stats: p.stats || null,
+    contract: assignContract(p, { isRookie: !!p.isRookie }),
   };
 }
 
@@ -107,10 +110,7 @@ function fillCpuTeamsRandomly({ cpuTeams, pool, claimedIds, rng = Math.random })
       if (drawn.length === 0) break;
       for (const p of drawn) {
         if (team.players.length >= ROSTER_SIZE) break;
-        team.players.push({
-          ...toRosterEntry(p),
-          contract: { years: 1 + Math.floor(rng() * 4), salary: Math.round((p.rating || 70) * 0.5) },
-        });
+        team.players.push(toRosterEntry(p));
       }
     }
   }
